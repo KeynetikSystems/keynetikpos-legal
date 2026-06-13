@@ -11,6 +11,7 @@
 // =============================================================================
 
 #include "shift_dialogs.h"
+#include "cart.h"            // currencySymbol()
 #include <QVBoxLayout>
 #include <QFormLayout>
 #include <QHBoxLayout>
@@ -58,7 +59,7 @@ OpenShiftDialog::OpenShiftDialog(QWidget *parent)
     m_openingFloat = new QDoubleSpinBox(group);
     m_openingFloat->setRange(0.0, 99999.99);
     m_openingFloat->setDecimals(2);
-    m_openingFloat->setPrefix("$ ");
+    m_openingFloat->setPrefix(currencySymbol() + " ");
     m_openingFloat->setFixedWidth(130);
     form->addRow("Opening Float:", m_openingFloat);
 

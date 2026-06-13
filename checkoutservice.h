@@ -1,9 +1,10 @@
 // =============================================================================
 // checkoutservice.h — CheckoutService: totals math + the sale pipeline
 // -----------------------------------------------------------------------------
-// WHAT: computeCartTotals() derives subtotal/discount/tax/total from the
-//       configurable tax settings. CheckoutService::finalizeSale() runs the
-//       post-payment pipeline: cart -> SaleItems -> Database::recordSale()
+// WHAT: CheckoutService::finalizeSale() runs the post-payment pipeline. The
+//       totals math (CartTotals/computeCartTotals) now lives in carttotals.h so
+//       it can be unit-tested without the DB/UI; this header re-exports it via
+//       that include. Pipeline: cart -> SaleItems -> Database::recordSale()
 //       (atomic stock check + insert + decrement) -> receipt print ->
 //       InventoryManager::refreshAfterSale() per product -> audit log.
 // HOW:  Plain class (no QObject) holding the InventoryManager and
@@ -22,22 +23,10 @@
 #include <QString>
 
 #include "cart.h"
-#include "settingsmanager.h"   // BusinessSettings
+#include "carttotals.h"        // CartTotals, computeCartTotals()
 
 class InventoryManager;
 class ReceiptPrinter;
-
-// Totals derived from the configurable tax settings. The discount reduces
-// the taxable base; with tax-inclusive pricing the tax shown is informational.
-struct CartTotals {
-    double subtotal = 0.0;
-    double discount = 0.0;
-    double tax      = 0.0;
-    double total    = 0.0;
-};
-
-CartTotals computeCartTotals(double subtotal, double discount,
-                             const BusinessSettings &bs);
 
 struct CheckoutResult {
     bool    ok     { false };

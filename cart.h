@@ -3,8 +3,9 @@
 // -----------------------------------------------------------------------------
 // WHAT: Cart models one open transaction (line items, discount + reason,
 //       timestamps, subtotal/item-count helpers). Also hosts roundCents() and
-//       formatKsh(), the two money helpers shared by the cart model, the
-//       checkout service, and the main window.
+//       formatMoney(), the money helpers shared by the cart model, the
+//       checkout service, and the main window, plus the configurable currency
+//       symbol they read.
 // HOW:  Header-only value struct, no Qt object model, no database access.
 //       Multi-cart bookkeeping (which carts exist, which is current) lives in
 //       CartService; this type is purely the data.
@@ -28,9 +29,35 @@ inline double roundCents(double v)
     return std::round(v * 100.0) / 100.0;
 }
 
-inline QString formatKsh(double amount)
+// ─────────────────────────────────────────────────────────────────────────────
+// Currency — single source of truth for money display
+//
+// The symbol is configurable (BusinessSettings.currencySymbol): set once at
+// startup and again on settings change via setCurrencySymbol(). Everything that
+// shows money goes through formatMoney() so the configured currency is honoured
+// everywhere — there are no more hard-coded "KSh"/"$" literals scattered around.
+// ─────────────────────────────────────────────────────────────────────────────
+inline QString &currencySymbolStore()
 {
-    return QString("KSh %1").arg(roundCents(amount), 0, 'f', 2);
+    static QString s = QStringLiteral("KSh");   // app's primary market default
+    return s;
+}
+
+inline QString currencySymbol()
+{
+    return currencySymbolStore();
+}
+
+inline void setCurrencySymbol(const QString &sym)
+{
+    const QString trimmed = sym.trimmed();
+    currencySymbolStore() = trimmed.isEmpty() ? QStringLiteral("KSh") : trimmed;
+}
+
+inline QString formatMoney(double amount)
+{
+    return QString("%1 %2").arg(currencySymbol())
+                           .arg(roundCents(amount), 0, 'f', 2);
 }
 
 // -----------------------------------------------------------------------------

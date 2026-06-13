@@ -13,6 +13,7 @@
 // =============================================================================
 #include "paymentdialog.h"
 #include "appstyle.h"
+#include "cart.h"          // formatMoney(), currencySymbol()
 #include <QVBoxLayout>
 #include <QHBoxLayout>
 #include <QGroupBox>
@@ -43,7 +44,7 @@ void PaymentDialog::setupUI()
 
     // Total amount display — themed banner (was hardcoded light-blue, which
     // broke in dark mode)
-    totalLabel = new QLabel(QString("Total Amount: KSh %1").arg(total, 0, 'f', 2));
+    totalLabel = new QLabel("Total Amount: " + formatMoney(total));
     totalLabel->setProperty("role", "banner");
     totalLabel->setProperty("kind", "success");
     totalLabel->setProperty("textScale", "2xl");
@@ -91,7 +92,7 @@ void PaymentDialog::setupUI()
     amountPaidSpin = new QDoubleSpinBox();
     amountPaidSpin->setRange(0.0, 9999999.99);
     amountPaidSpin->setDecimals(2);
-    amountPaidSpin->setPrefix("KSh ");
+    amountPaidSpin->setPrefix(currencySymbol() + " ");
     amountPaidSpin->setValue(total);
     amountPaidSpin->setButtonSymbols(QAbstractSpinBox::NoButtons);
     amountPaidSpin->setProperty("textScale", "xl");
@@ -110,7 +111,7 @@ void PaymentDialog::setupUI()
     refLayout->addWidget(referenceEdit);
     amountLayout->addLayout(refLayout);
 
-    changeLabel = new QLabel("Change: KSh 0.00");
+    changeLabel = new QLabel("Change: " + formatMoney(0));
     changeLabel->setProperty("kind", "success");
     changeLabel->setProperty("textScale", "xl");
     changeLabel->setProperty("bold", "true");
@@ -207,11 +208,10 @@ void PaymentDialog::calculateChange()
 
     if (change < 0) {
         changeLabel->setText(
-            QString("Change: KSh %1  ⚠ Insufficient").arg(change, 0, 'f', 2));
+            QString("Change: %1  ⚠ Insufficient").arg(formatMoney(change)));
         setStyleProperty(changeLabel, "kind", "danger");
     } else {
-        changeLabel->setText(
-            QString("Change: KSh %1").arg(change, 0, 'f', 2));
+        changeLabel->setText("Change: " + formatMoney(change));
         setStyleProperty(changeLabel, "kind", "success");
     }
 

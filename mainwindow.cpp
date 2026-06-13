@@ -65,6 +65,8 @@
 #include <QDialog>
 #include <QDialogButtonBox>
 #include <QPointer>
+#include <QSplitter>
+#include <QStackedWidget>
 #include <cmath>
 
 // -----------------------------------------------------------------------------
@@ -84,7 +86,7 @@ constexpr int DATETIME_UPDATE_MS    = 1000;
 
 // -----------------------------------------------------------------------------
 // File-local helpers
-// (roundCents/formatKsh live in cart.h; CartTotals/computeCartTotals in
+// (roundCents/formatMoney live in cart.h; CartTotals/computeCartTotals in
 //  checkoutservice.h)
 // -----------------------------------------------------------------------------
 static inline bool checkPermission(QWidget *parent, Permission perm,
@@ -126,13 +128,17 @@ MainWindow::MainWindow(QWidget *parent)
     QSqlDatabase appDb = QSqlDatabase::database();
     settingsManager = new SettingsManager(appDb, this);
 
+    // Currency symbol is configurable; seed the app-wide money formatter before
+    // any widget renders a price (setupUI runs below).
+    setCurrencySymbol(settingsManager->settings().currencySymbol);
+
     inventoryManager = new InventoryManager();
 
     // ── Schedule / messaging ────────────────────────────────────────────────
+    // Object + table must exist now; provider wiring and the scheduler loop are
+    // deferred (runDeferredStartup) so they don't delay first paint.
     scheduleManager = new ScheduleManager(this);
     scheduleManager->initDatabase();
-    reloadMessagingProviders(scheduleManager, this);
-    scheduleManager->start();
 
     // ── Services (CartService creates the first cart itself) ───────────────
     cartService     = new CartService(this);
@@ -171,26 +177,49 @@ MainWindow::MainWindow(QWidget *parent)
     applyTheme();
 
     // ── Inventory monitoring ────────────────────────────────────────────────
+    // Connections are cheap and set up now; the polling timer starts later in
+    // runDeferredStartup() so the first refresh doesn't run before first paint.
     connect(inventoryManager, &InventoryManager::inventoryLow,
             this, &MainWindow::onInventoryLow);
     connect(inventoryManager, &InventoryManager::inventoryCritical,
             this, &MainWindow::onInventoryCritical);
     connect(inventoryManager, &InventoryManager::inventoryOutOfStock,
             this, &MainWindow::onInventoryOutOfStock);
-    inventoryManager->startAutoRefresh(POSConfig::INVENTORY_CHECK_MS);
 
     // ── Receipt printer ─────────────────────────────────────────────────────
     const BusinessSettings &bs = settingsManager->settings();
     receiptPrinter->setCompanyInfo(bs.businessName, bs.address, bs.phone, "");
     receiptPrinter->setReceiptFooter(bs.receiptFooter);
 
-    // Keep totals + tax label in sync when tax settings change
+    // Keep totals + tax label + currency in sync when settings change
     connect(settingsManager, &SettingsManager::settingsChanged, this, [this]() {
+        setCurrencySymbol(settingsManager->settings().currencySymbol);
         refreshTaxTitle();
         updateTotals();
+        loadProducts();   // re-render price tags with the (possibly) new symbol
     });
 
-    // ── Barcode reader — init AFTER UI so statusLabel exists ────────────────
+    // ── Deferred startup ────────────────────────────────────────────────────
+    // Posted with a 0ms timer: it fires on the first event-loop iteration,
+    // which is AFTER main() calls show(), so the window paints first and the
+    // cashier can start working while scanning/scheduling spin up.
+    QTimer::singleShot(0, this, &MainWindow::runDeferredStartup);
+}
+
+// =============================================================================
+// Deferred (post-paint) startup
+// =============================================================================
+void MainWindow::runDeferredStartup()
+{
+    // Messaging providers + scheduler loop (may touch settings/network).
+    reloadMessagingProviders(scheduleManager, this);
+    scheduleManager->start();
+
+    // Inventory polling.
+    inventoryManager->startAutoRefresh(POSConfig::INVENTORY_CHECK_MS);
+
+    // Barcode scanner — in serial mode the port open() can block briefly.
+    // statusLabel already exists (setupUI ran in the ctor).
     initBarcodeReader();
 }
 
@@ -318,11 +347,21 @@ void MainWindow::setupUI()
     QHBoxLayout *mainLayout = new QHBoxLayout(centralWidget);
     mainLayout->setSpacing(10);
 
+    // A splitter (not fixed layout stretch) lets the cashier favour the
+    // catalogue or the cart on their screen; the 2:1 start ratio is preserved.
+    QSplitter *splitter = new QSplitter(Qt::Horizontal);
+    splitter->setChildrenCollapsible(false);
+    splitter->setHandleWidth(8);
+
     setupProductsPanel();
-    mainLayout->addWidget(productsPanel, 2);
+    splitter->addWidget(productsPanel);
 
     setupCartPanel();
-    mainLayout->addWidget(cartPanel, 1);
+    splitter->addWidget(cartPanel);
+
+    splitter->setStretchFactor(0, 2);
+    splitter->setStretchFactor(1, 1);
+    mainLayout->addWidget(splitter);
 
     setupMenuBar();
     setupStatusBar();
@@ -502,7 +541,10 @@ void MainWindow::setupProductsPanel()
     searchEdit->setAccessibleName("Product search");
     searchEdit->setToolTip("Search products by name or barcode (F3)");
     connect(searchEdit, &QLineEdit::textChanged, this,
-            [this](const QString &text) { productProxy->setSearchText(text); });
+            [this](const QString &text) {
+                productProxy->setSearchText(text);
+                updateProductEmptyState();
+            });
     searchLayout->addWidget(searchEdit);
     layout->addLayout(searchLayout);
 
@@ -513,7 +555,10 @@ void MainWindow::setupProductsPanel()
     categoryCombo->addItem("All Categories");
     categoryCombo->setMinimumHeight(35);
     connect(categoryCombo, &QComboBox::currentTextChanged, this,
-            [this](const QString &cat) { productProxy->setCategory(cat); });
+            [this](const QString &cat) {
+                productProxy->setCategory(cat);
+                updateProductEmptyState();
+            });
     filterLayout->addWidget(categoryCombo);
     filterLayout->addStretch();
     layout->addLayout(filterLayout);
@@ -544,7 +589,20 @@ void MainWindow::setupProductsPanel()
             this, &MainWindow::onProductCardClicked);
     connect(productView, &QListView::activated,
             this, &MainWindow::onProductCardClicked);
-    layout->addWidget(productView);
+
+    // Empty state: when a search/filter yields nothing, show a hint instead of
+    // a blank grid. A QStackedWidget swaps the view for the placeholder.
+    productEmpty = new QLabel(
+        "No products match your search.\n\n"
+        "Try a different term or clear the filters.");
+    productEmpty->setAlignment(Qt::AlignCenter);
+    productEmpty->setProperty("kind", "secondary");
+    productEmpty->setProperty("textScale", "lg");
+
+    productStack = new QStackedWidget();
+    productStack->addWidget(productView);    // index 0 — grid
+    productStack->addWidget(productEmpty);   // index 1 — empty hint
+    layout->addWidget(productStack);
 }
 
 void MainWindow::setupCartPanel()
@@ -574,14 +632,38 @@ void MainWindow::setupCartPanel()
     // Sorting stays OFF: rows map 1:1 to Cart::items indices.
     cartTable->setSortingEnabled(false);
     cartTable->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
-    cartTable->horizontalHeader()->setStretchLastSection(false);
-    cartTable->horizontalHeader()->setSectionResizeMode(QHeaderView::Stretch);
-    cartTable->horizontalHeader()->setSectionResizeMode(
-        CartModel::ColRemove, QHeaderView::Fixed);
-    cartTable->setColumnWidth(CartModel::ColRemove, 60);
+
+    // Column sizing: the product name takes the slack; price/subtotal hug their
+    // content; the − / qty / + / ✖ controls are fixed, generously-sized tap
+    // targets for touch terminals.
+    QHeaderView *hh = cartTable->horizontalHeader();
+    hh->setStretchLastSection(false);
+    hh->setSectionResizeMode(QHeaderView::ResizeToContents);
+    hh->setSectionResizeMode(CartModel::ColProduct, QHeaderView::Stretch);
+    hh->setSectionResizeMode(CartModel::ColDec,    QHeaderView::Fixed);
+    hh->setSectionResizeMode(CartModel::ColQty,    QHeaderView::Fixed);
+    hh->setSectionResizeMode(CartModel::ColInc,    QHeaderView::Fixed);
+    hh->setSectionResizeMode(CartModel::ColRemove, QHeaderView::Fixed);
+    cartTable->setColumnWidth(CartModel::ColDec,    46);
+    cartTable->setColumnWidth(CartModel::ColQty,    56);
+    cartTable->setColumnWidth(CartModel::ColInc,    46);
+    cartTable->setColumnWidth(CartModel::ColRemove, 56);
+    // Taller rows = bigger tap targets and easier reading on a touchscreen.
+    cartTable->verticalHeader()->setDefaultSectionSize(46);
+
     connect(cartTable, &QTableView::clicked,
             this, &MainWindow::onCartTableClicked);
-    layout->addWidget(cartTable, 1);
+
+    cartEmpty = new QLabel(
+        "Cart is empty.\n\nScan a barcode or tap a product to begin.");
+    cartEmpty->setAlignment(Qt::AlignCenter);
+    cartEmpty->setProperty("kind", "secondary");
+    cartEmpty->setProperty("textScale", "lg");
+
+    cartStack = new QStackedWidget();
+    cartStack->addWidget(cartTable);    // index 0 — line items
+    cartStack->addWidget(cartEmpty);    // index 1 — empty hint
+    layout->addWidget(cartStack, 1);
 
     setupTotalsSection();
     layout->addWidget(totalsGroup);
@@ -596,7 +678,7 @@ void MainWindow::setupTotalsSection()
     QGridLayout *totalsLayout = new QGridLayout(totalsGroup);
 
     totalsLayout->addWidget(new QLabel("Subtotal:"), 0, 0);
-    subtotalLabel = new QLabel("KSh 0.00");
+    subtotalLabel = new QLabel(formatCurrency(0));
     subtotalLabel->setProperty("role", "amount");
     subtotalLabel->setAlignment(Qt::AlignRight);
     totalsLayout->addWidget(subtotalLabel, 0, 1);
@@ -604,13 +686,13 @@ void MainWindow::setupTotalsSection()
     taxTitleLabel = new QLabel();
     refreshTaxTitle();
     totalsLayout->addWidget(taxTitleLabel, 1, 0);
-    taxLabel = new QLabel("KSh 0.00");
+    taxLabel = new QLabel(formatCurrency(0));
     taxLabel->setProperty("role", "amount");
     taxLabel->setAlignment(Qt::AlignRight);
     totalsLayout->addWidget(taxLabel, 1, 1);
 
     totalsLayout->addWidget(new QLabel("Discount:"), 2, 0);
-    discountLabel = new QLabel("KSh 0.00");
+    discountLabel = new QLabel(formatCurrency(0));
     discountLabel->setProperty("role", "amountDiscount");
     discountLabel->setAlignment(Qt::AlignRight);
     totalsLayout->addWidget(discountLabel, 2, 1);
@@ -624,7 +706,7 @@ void MainWindow::setupTotalsSection()
     totalTitle->setProperty("role", "totalTitle");
     totalsLayout->addWidget(totalTitle, 4, 0);
 
-    totalLabel = new QLabel("KSh 0.00");
+    totalLabel = new QLabel(formatCurrency(0));
     totalLabel->setProperty("role", "amountTotal");
     totalLabel->setAlignment(Qt::AlignRight);
     totalsLayout->addWidget(totalLabel, 4, 1);
@@ -681,6 +763,22 @@ void MainWindow::loadProducts()
     categoryCombo->setCurrentIndex(idx >= 0 ? idx : 0);
     categoryCombo->blockSignals(false);
     productProxy->setCategory(categoryCombo->currentText());
+    updateProductEmptyState();
+}
+
+// Swap the grid for a hint when a search/filter yields no products.
+void MainWindow::updateProductEmptyState()
+{
+    if (!productStack || !productProxy) return;
+    productStack->setCurrentIndex(productProxy->rowCount() == 0 ? 1 : 0);
+}
+
+// Swap the cart table for a hint when there are no line items.
+void MainWindow::updateCartEmptyState()
+{
+    if (!cartStack) return;
+    Cart *cart = cartService->current();
+    cartStack->setCurrentIndex((!cart || cart->items.isEmpty()) ? 1 : 0);
 }
 
 // =============================================================================
@@ -721,6 +819,7 @@ void MainWindow::onCartContentChanged()
     Cart *activeCart = cartService->current();
     checkoutBtn->setEnabled(activeCart && !activeCart->items.isEmpty());
     updateTotals();
+    updateCartEmptyState();
 }
 
 // -----------------------------------------------------------------------------
@@ -728,13 +827,27 @@ void MainWindow::onCartContentChanged()
 // -----------------------------------------------------------------------------
 void MainWindow::onCartTableClicked(const QModelIndex &index)
 {
-    if (!index.isValid() || index.column() != CartModel::ColRemove)
+    if (!index.isValid())
         return;
 
-    const QString itemName =
-        cartModel->index(index.row(), CartModel::ColProduct).data().toString();
-    if (cartService->removeItemAt(index.row()))
-        statusLabel->setText(QString("Removed %1 from cart").arg(itemName));
+    const int row = index.row();
+    switch (index.column()) {
+    case CartModel::ColDec:
+        cartModel->adjustQuantity(row, -1);
+        break;
+    case CartModel::ColInc:
+        cartModel->adjustQuantity(row, +1);
+        break;
+    case CartModel::ColRemove: {
+        const QString itemName =
+            cartModel->index(row, CartModel::ColProduct).data().toString();
+        if (cartService->removeItemAt(row))
+            statusLabel->setText(QString("Removed %1 from cart").arg(itemName));
+        break;
+    }
+    default:
+        break;
+    }
 }
 
 void MainWindow::updateTotals()
@@ -880,18 +993,32 @@ void MainWindow::onCheckout()
         return;
     }
 
-    cartService->clearCurrent();
-    loadProducts();
+    // Only the sold products' stock changed — refresh just those grid cells
+    // instead of reloading the whole catalogue and resetting the model (which
+    // re-lays-out every card and flickers the grid). Capture the ids before
+    // clearing the cart, then push the authoritative new stock into the model.
+    QVector<int> soldProductIds;
+    soldProductIds.reserve(activeCart->items.size());
+    for (const CartItem &it : activeCart->items)
+        soldProductIds.append(it.productId);
 
-    statusLabel->setText(
-        QString("Sale #%1 completed successfully!").arg(result.saleId));
-    QMessageBox::information(
-        this, "Sale Complete",
-        QString("Sale completed!\n\nTotal: %1\nPaid: %2\nChange: %3"
-                "\n\nReceipt has been saved.")
-            .arg(formatCurrency(t.total),
-                 formatCurrency(amountPaid),
-                 formatCurrency(change)));
+    cartService->clearCurrent();
+
+    for (int pid : soldProductIds)
+        productModel->updateStock(pid, Database::instance().getProductById(pid).stockQuantity);
+
+    // Non-blocking success: a blocking dialog after every sale slows the queue.
+    // Change due is the one figure the cashier must act on, so it stays in the
+    // persistent status bar in addition to the auto-dismissing toast. Focus
+    // returns to the search box, ready for the next customer.
+    const QString summary = change > 0.0
+        ? QString("✔ Sale #%1 complete — Change due: %2")
+              .arg(result.saleId).arg(formatCurrency(change))
+        : QString("✔ Sale #%1 complete — receipt saved").arg(result.saleId);
+    statusLabel->setText(summary);
+    showToast(summary, "success");
+    searchEdit->clear();
+    searchEdit->setFocus();
 }
 
 void MainWindow::onNewSale()
@@ -1131,9 +1258,18 @@ void MainWindow::onManageInventory()
 {
     if (!checkPermission(this, Permission::VIEW_INVENTORY, "view inventory"))
         return;
-    InventoryDialog dialog(inventoryManager, this);
-    dialog.exec();
-    loadProducts();
+    // Modeless + single instance: the cashier can keep inventory open while
+    // ringing up sales instead of being locked out by a modal.
+    if (m_inventoryDlg) {
+        m_inventoryDlg->raise();
+        m_inventoryDlg->activateWindow();
+        return;
+    }
+    auto *dialog = new InventoryDialog(inventoryManager, this);
+    dialog->setAttribute(Qt::WA_DeleteOnClose);
+    m_inventoryDlg = dialog;
+    connect(dialog, &QDialog::finished, this, [this](int) { loadProducts(); });
+    dialog->show();
     UserManager::instance().logUserAction("Managed Inventory",
                                           "Opened inventory management");
 }
@@ -1200,8 +1336,18 @@ void MainWindow::onViewSalesHistory()
 {
     if (!checkPermission(this, Permission::VIEW_SALES, "view sales history"))
         return;
-    SalesHistoryDialog dialog(this);
-    dialog.exec();
+    // Modeless + single instance: reference past sales mid-transaction.
+    if (m_salesHistoryDlg) {
+        m_salesHistoryDlg->raise();
+        m_salesHistoryDlg->activateWindow();
+        return;
+    }
+    auto *dialog = new SalesHistoryDialog(this);
+    dialog->setAttribute(Qt::WA_DeleteOnClose);
+    m_salesHistoryDlg = dialog;
+    // Refunds restore stock, so refresh the grid when it closes.
+    connect(dialog, &QDialog::finished, this, [this](int) { loadProducts(); });
+    dialog->show();
     UserManager::instance().logUserAction("Viewed Sales History",
                                           "Opened sales history dialog");
 }
@@ -1458,7 +1604,7 @@ void MainWindow::setupKeyboardShortcuts()
 
 QString MainWindow::formatCurrency(double amount)
 {
-    return formatKsh(amount);
+    return formatMoney(amount);
 }
 
 // -----------------------------------------------------------------------------

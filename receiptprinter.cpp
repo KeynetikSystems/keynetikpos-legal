@@ -12,6 +12,7 @@
 //    the original exactly, even if products changed since.
 // =============================================================================
 #include "receiptprinter.h"
+#include "cart.h"          // formatMoney()
 #include <QFileDialog>
 #include <QTextStream>
 #include <QDebug>
@@ -347,7 +348,7 @@ QString ReceiptPrinter::getLastError() const
 
 QString ReceiptPrinter::formatCurrency(double amount) const
 {
-    return QString("KSh %1").arg(amount, 0, 'f', 2);
+    return formatMoney(amount);
 }
 
 QString ReceiptPrinter::centerText(const QString &text, int width) const

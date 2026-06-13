@@ -2,10 +2,11 @@
 // cartmodel.h — CartModel + CartQtyDelegate: model/view adapter for the cart
 // -----------------------------------------------------------------------------
 // WHAT: CartModel is a QAbstractTableModel exposing the CURRENT cart's line
-//       items (Product / Price / Qty / Subtotal / ✖) to a QTableView. Qty is
-//       editable in place; clicking the ✖ column removes the row (handled by
-//       the view's clicked() signal — no per-row widgets). CartQtyDelegate
-//       gives the Qty column a QSpinBox capped at available stock.
+//       items (Product / Price / − / Qty / + / Subtotal / ✖) to a QTableView.
+//       Qty is editable in place AND adjustable via the touch-friendly − / +
+//       tap columns; clicking the ✖ column removes the row (all handled by the
+//       view's clicked() signal — no per-row widgets). CartQtyDelegate gives
+//       the Qty column a QSpinBox capped at available stock.
 // HOW:  The model holds a CartService pointer and resets on its change
 //       signals. setData() routes edits back through the service so every
 //       observer stays in sync; an internal-change guard swaps the full reset
@@ -34,11 +35,17 @@ public:
     enum Column {
         ColProduct = 0,
         ColPrice,
+        ColDec,        // − tap target (touch-friendly quantity decrement)
         ColQty,
+        ColInc,        // + tap target (touch-friendly quantity increment)
         ColSubtotal,
         ColRemove,
         ColCount
     };
+
+    // Nudge a line's quantity by ±1 (used by the − / + tap columns); clamps to
+    // [1, available stock] and routes through the service like a spin edit.
+    void adjustQuantity(int row, int delta);
 
     static constexpr int ProductIdRole = Qt::UserRole + 1;
 

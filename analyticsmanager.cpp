@@ -11,6 +11,7 @@
 //  - Holds only a reference to the externally owned QSqlDatabase.
 // =============================================================================
 #include "analyticsmanager.h"
+#include "cart.h"          // formatMoney()
 #include <QSqlQuery>
 #include <QSqlError>
 #include <QDebug>
@@ -538,5 +539,5 @@ QDateTime AnalyticsManager::getEndOfDay(const QDate &date)
 
 QString AnalyticsManager::formatCurrency(double amount) const
 {
-    return QString("$%1").arg(amount, 0, 'f', 2);
+    return formatMoney(amount);
 }

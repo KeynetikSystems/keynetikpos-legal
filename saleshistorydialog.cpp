@@ -11,6 +11,7 @@
 // =============================================================================
 #include "saleshistorydialog.h"
 #include "colorscheme.h"
+#include "cart.h"          // formatMoney()
 #include <QVBoxLayout>
 #include <QHBoxLayout>
 #include <QGroupBox>
@@ -112,7 +113,7 @@ void SalesHistoryDialog::setupUI()
 
     QGroupBox *salesCard = new QGroupBox("Total Sales");
     QVBoxLayout *salesLayout = new QVBoxLayout(salesCard);
-    totalSalesLabel = makeStatLabel("KSh 0.00", "success");
+    totalSalesLabel = makeStatLabel(formatMoney(0), "success");
     salesLayout->addWidget(totalSalesLabel);
     summaryLayout->addWidget(salesCard);
 
@@ -124,13 +125,13 @@ void SalesHistoryDialog::setupUI()
 
     QGroupBox *avgCard = new QGroupBox("Average Sale");
     QVBoxLayout *avgLayout = new QVBoxLayout(avgCard);
-    avgTransactionLabel = makeStatLabel("KSh 0.00", "tertiary");
+    avgTransactionLabel = makeStatLabel(formatMoney(0), "tertiary");
     avgLayout->addWidget(avgTransactionLabel);
     summaryLayout->addWidget(avgCard);
 
     QGroupBox *taxCard = new QGroupBox("Total Tax");
     QVBoxLayout *taxLayout = new QVBoxLayout(taxCard);
-    totalTaxLabel = makeStatLabel("KSh 0.00", "danger");
+    totalTaxLabel = makeStatLabel(formatMoney(0), "danger");
     taxLayout->addWidget(totalTaxLabel);
     summaryLayout->addWidget(taxCard);
 
@@ -520,5 +521,5 @@ void SalesHistoryDialog::onQuickFilterChanged(const QString &filter)
 
 QString SalesHistoryDialog::formatCurrency(double amount)
 {
-    return QString("KSh %1").arg(amount, 0, 'f', 2);
+    return formatMoney(amount);
 }

@@ -17,6 +17,7 @@
 // =============================================================================
 #include "database.h"
 #include "passwordhasher.h"
+#include "cart.h"            // roundCents()
 #include <QSqlQuery>
 #include <QSqlError>
 #include <QVariant>
@@ -59,6 +60,13 @@ Database::~Database()
 
 bool Database::initialize()
 {
+    // Idempotent: main() initializes the DB, and so does the MainWindow ctor
+    // (which is rebuilt on every logout->login). Re-running open() makes the
+    // SQLite driver close and reopen the file, and re-runs all the schema
+    // bootstrap below for nothing. Once we've succeeded, later calls are no-ops.
+    if (initialized && db.isOpen())
+        return true;
+
     if (!db.open()) {
         lastError = "Failed to open database: " + db.lastError().text();
         qDebug() << lastError;
@@ -66,10 +74,15 @@ bool Database::initialize()
     }
     qDebug() << "Database opened successfully";
 
-    // SQLite leaves foreign keys off per-connection unless asked
+    // Per-connection PRAGMAs. SQLite leaves foreign keys off unless asked.
+    // WAL improves read/write concurrency and crash durability; busy_timeout
+    // makes a second connection (e.g. a future second instance pointed at the
+    // same DB file) wait briefly for a lock instead of failing with SQLITE_BUSY.
     {
         QSqlQuery pragma(db);
         pragma.exec("PRAGMA foreign_keys = ON");
+        pragma.exec("PRAGMA journal_mode = WAL");
+        pragma.exec("PRAGMA busy_timeout = 5000");
     }
 
     if (!createTables()) {
@@ -98,6 +111,7 @@ bool Database::initialize()
     } else {
         qDebug() << "Failed to query product count:" << query.lastError().text();
     }
+    initialized = true;
     return true;
 }
 
@@ -212,6 +226,9 @@ bool Database::createTables()
         )
     )";
     // Create indexes for better performance
+    // Category browsing/filtering scans products(category, is_active); without
+    // this it's a full table scan on every category switch and reload.
+    queries << "CREATE INDEX IF NOT EXISTS idx_products_category ON products(category, is_active)";
     queries << "CREATE INDEX IF NOT EXISTS idx_users_username ON users(username)";
     queries << "CREATE INDEX IF NOT EXISTS idx_users_email ON users(email)";
     queries << "CREATE INDEX IF NOT EXISTS idx_activity_log_user ON user_activity_log(user_id)";
@@ -651,7 +668,7 @@ int Database::recordSale(const QVector<SaleItem> &items,
         itemQuery.addBindValue(item.quantity);
         itemQuery.addBindValue(item.price);
         itemQuery.addBindValue(item.costPrice);
-        itemQuery.addBindValue(item.price * item.quantity);
+        itemQuery.addBindValue(roundCents(item.price * item.quantity));
         if (!itemQuery.exec()) {
             lastError = itemQuery.lastError().text();
             db.rollback();
@@ -867,6 +884,16 @@ bool Database::processRefund(int saleId, const QString &reason, const QString &p
     Sale sale = getSaleById(saleId);
     if (sale.id <= 0) {
         db.rollback();
+        lastError = QString("Sale #%1 not found").arg(saleId);
+        return false;
+    }
+
+    // Guard against double-refunds at the DB level: a second refund would
+    // insert another refund row AND restore stock again. The check lives
+    // inside the transaction so it holds even if a caller forgets to gate it.
+    if (isRefunded(saleId)) {
+        db.rollback();
+        lastError = QString("Sale #%1 has already been refunded").arg(saleId);
         return false;
     }
 

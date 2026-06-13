@@ -19,27 +19,6 @@
 
 #include <QDateTime>
 
-CartTotals computeCartTotals(double subtotal, double discount,
-                             const BusinessSettings &bs)
-{
-    CartTotals t;
-    t.subtotal = roundCents(subtotal);
-    t.discount = roundCents(qBound(0.0, discount, t.subtotal));
-    const double base = t.subtotal - t.discount;
-
-    if (!bs.taxEnabled || bs.taxRate <= 0.0) {
-        t.tax   = 0.0;
-        t.total = roundCents(base);
-    } else if (bs.taxInclusive) {
-        t.tax   = roundCents(base - base / (1.0 + bs.taxRate));
-        t.total = roundCents(base);
-    } else {
-        t.tax   = roundCents(base * bs.taxRate);
-        t.total = roundCents(base + t.tax);
-    }
-    return t;
-}
-
 CheckoutService::CheckoutService(InventoryManager *inventory,
                                  ReceiptPrinter *printer)
     : m_inventory(inventory)
@@ -65,6 +44,7 @@ CheckoutResult CheckoutService::finalizeSale(const Cart &cart,
         si.quantity    = item.quantity;
         si.price       = item.price;
         si.costPrice   = item.costPrice;
+        si.subtotal    = roundCents(item.price * item.quantity);
         saleItems.append(si);
     }
 
@@ -104,8 +84,8 @@ CheckoutResult CheckoutService::finalizeSale(const Cart &cart,
 
     UserManager::instance().logUserAction(
         "Sale Completed",
-        QString("Sale #%1, Total: KSH %2, Method: %3%4, Items: %5")
-            .arg(saleId).arg(t.total)
+        QString("Sale #%1, Total: %2, Method: %3%4, Items: %5")
+            .arg(saleId).arg(formatMoney(t.total))
             .arg(paymentMethod)
             .arg(referenceNumber.isEmpty()
                      ? QString()

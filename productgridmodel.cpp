@@ -32,6 +32,20 @@ void ProductGridModel::setProducts(const QVector<Product> &products)
     endResetModel();
 }
 
+void ProductGridModel::updateStock(int productId, int newQty)
+{
+    for (int row = 0; row < m_products.size(); ++row) {
+        if (m_products[row].id == productId) {
+            m_products[row].stockQuantity = newQty;
+            const QModelIndex idx = index(row);
+            // Default (empty) roles == "all roles": repaints the card and lets
+            // the view re-evaluate flags() so it enables/disables on stock-out.
+            emit dataChanged(idx, idx);
+            return;
+        }
+    }
+}
+
 int ProductGridModel::rowCount(const QModelIndex &parent) const
 {
     return parent.isValid() ? 0 : m_products.size();
@@ -198,7 +212,7 @@ void ProductCardDelegate::paint(QPainter *painter,
     painter->setFont(detailFont);
 
     const QString price =
-        formatKsh(index.data(ProductGridModel::PriceRole).toDouble());
+        formatMoney(index.data(ProductGridModel::PriceRole).toDouble());
     const QString stockText =
         stock <= 0      ? QStringLiteral("OUT OF STOCK")
         : !severity.isEmpty() ? QString("%1 — %2 left").arg(severity).arg(stock)

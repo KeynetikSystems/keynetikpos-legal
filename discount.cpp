@@ -12,6 +12,7 @@
 //    default — production PIN checks go through SettingsManager (PBKDF2).
 // =============================================================================
 #include "discount.h"
+#include "cart.h"          // formatMoney()
 #include <QSqlQuery>
 #include <QSqlError>
 #include <QDateTime>
@@ -44,15 +45,19 @@ void DiscountManager::createTableIfNotExist()
 
 void DiscountManager::loadDefaultPresets()
 {
+    // Fixed-amount labels use the configured currency symbol (see cart.h) so a
+    // KSh deployment never shows a stray "$". The symbol is read at construction
+    // time, which is after setCurrencySymbol() runs at startup.
+    const QString sym = currencySymbol();
     m_presets = {
                  {"5% Off",    DiscountType::PercentageOff, 0.05},
                  {"10% Off",   DiscountType::PercentageOff, 0.10},
                  {"15% Off",   DiscountType::PercentageOff, 0.15},
                  {"20% Off",   DiscountType::PercentageOff, 0.20},
                  {"Staff 25%", DiscountType::PercentageOff, 0.25},
-                 {"$2 Off",    DiscountType::FixedAmount,   2.00},
-                 {"$5 Off",    DiscountType::FixedAmount,   5.00},
-                 {"$10 Off",   DiscountType::FixedAmount,   10.00},
+                 {QString("%1 2 Off").arg(sym),  DiscountType::FixedAmount,  2.00},
+                 {QString("%1 5 Off").arg(sym),  DiscountType::FixedAmount,  5.00},
+                 {QString("%1 10 Off").arg(sym), DiscountType::FixedAmount, 10.00},
                  };
 }
 
@@ -79,7 +84,7 @@ DiscountResult DiscountManager::applyFixedAmount(double subtotal, double amount,
     r.type      = DiscountType::FixedAmount;
     r.value     = amount;
     r.amount    = qMin(amount, subtotal);
-    r.label     = QString("$%1 Off").arg(amount, 0, 'f', 2);
+    r.label     = QString("%1 Off").arg(formatMoney(amount));
     r.appliedBy = cashier;
     return r;
 }

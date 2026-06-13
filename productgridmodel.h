@@ -46,6 +46,11 @@ public:
 
     void setProducts(const QVector<Product> &products);
 
+    // Refresh just one product's stock in place (after a sale), emitting
+    // dataChanged for that row only — avoids a full model reset / grid relayout.
+    // No-op if the product isn't currently loaded.
+    void updateStock(int productId, int newQty);
+
     int      rowCount(const QModelIndex &parent = QModelIndex()) const override;
     QVariant data(const QModelIndex &index, int role) const override;
     Qt::ItemFlags flags(const QModelIndex &index) const override;

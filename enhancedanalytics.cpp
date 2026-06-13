@@ -12,6 +12,7 @@
 //    date range via refreshAllWidgets().
 // =============================================================================
 #include "enhancedanalytics.h"
+#include "cart.h"          // formatMoney(), currencySymbol()
 #include <QSqlQuery>
 #include <QSqlError>
 #include <QDebug>
@@ -97,7 +98,8 @@ protected:
             // Value
             painter.drawText(x, height() - margin - barHeight - 5,
                              barWidth, 20, Qt::AlignCenter,
-                             QString("$%1").arg(m_data[i].second, 0, 'f', 0));
+                             QString("%1 %2").arg(currencySymbol())
+                                 .arg(m_data[i].second, 0, 'f', 0));
 
             x += barWidth + 10;
         }
@@ -196,10 +198,10 @@ void SalesTrendWidget::loadData()
     createChart();
 
     // Update labels
-    m_totalLabel->setText(QString("Total: $%1").arg(total, 0, 'f', 2));
+    m_totalLabel->setText("Total: " + formatMoney(total));
 
     double average = m_salesData.isEmpty() ? 0 : total / m_salesData.size();
-    m_averageLabel->setText(QString("Avg: $%1/day").arg(average, 0, 'f', 2));
+    m_averageLabel->setText(QString("Avg: %1/day").arg(formatMoney(average)));
 
     QString trend = m_salesData.size() >= 2 &&
                             m_salesData.last().amount > m_salesData.first().amount ?
@@ -395,8 +397,8 @@ void TopProductsWidget::displayTable()
                                                       .arg(i + 1)
                                                       .arg(rank.productName)));
         table->setItem(i, 1, new QTableWidgetItem(QString::number(rank.quantitySold)));
-        table->setItem(i, 2, new QTableWidgetItem(QString("$%1").arg(rank.revenue, 0, 'f', 2)));
-        table->setItem(i, 3, new QTableWidgetItem(QString("$%1").arg(rank.profit, 0, 'f', 2)));
+        table->setItem(i, 2, new QTableWidgetItem(formatMoney(rank.revenue)));
+        table->setItem(i, 3, new QTableWidgetItem(formatMoney(rank.profit)));
     }
 
     table->resizeColumnsToContents();
@@ -546,7 +548,7 @@ void CustomerAnalyticsWidget::loadData()
     // Average value
     query.exec("SELECT AVG(TotalSpent) FROM Customers WHERE TotalSpent > 0");
     double avgValue = query.next() ? query.value(0).toDouble() : 0;
-    m_averageValueLabel->setText(QString("Avg Lifetime Value\n$%1").arg(avgValue, 0, 'f', 2));
+    m_averageValueLabel->setText(QString("Avg Lifetime Value\n%1").arg(formatMoney(avgValue)));
 
     // Top tier count
     query.exec("SELECT COUNT(*) FROM Customers WHERE Tier IN ('VIP', 'Platinum')");
@@ -725,7 +727,7 @@ void QuickStatsWidget::loadTodayStats()
         WHERE DATE(SaleDatetime) = date('now')
     )");
     double todaySales = query.next() ? query.value(0).toDouble() : 0;
-    m_todaySalesLabel->setText(QString("Today: $%1").arg(todaySales, 0, 'f', 2));
+    m_todaySalesLabel->setText(QString("Today: %1").arg(formatMoney(todaySales)));
 
     // Today's transactions
     query.exec("SELECT COUNT(DISTINCT SaleID) FROM Sales WHERE DATE(SaleDatetime) = date('now')");
@@ -737,5 +739,5 @@ void QuickStatsWidget::loadTodayStats()
 
     // Average ticket
     double avgTicket = transactions > 0 ? todaySales / transactions : 0;
-    m_averageTicketLabel->setText(QString("Avg: $%1").arg(avgTicket, 0, 'f', 2));
+    m_averageTicketLabel->setText(QString("Avg: %1").arg(formatMoney(avgTicket)));
 }

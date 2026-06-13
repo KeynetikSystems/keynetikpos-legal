@@ -12,8 +12,11 @@
 //       ensureColumn() adds missing columns so old databases upgrade in place.
 //       recordSale() re-validates stock, inserts sale + items, and decrements
 //       stock inside ONE transaction — any failure rolls everything back.
-// WHY:  Stock validation inside the transaction is what makes concurrent
-//       overselling impossible (a UI-side check would be a race). Sale items
+// WHY:  Validating stock inside the same transaction that decrements it keeps
+//       the check and the write atomic, so the sale can't be built on a stock
+//       count that changed under it. The app is single-threaded today, but WAL
+//       + busy_timeout (see initialize()) mean a second connection on the same
+//       DB file would also be handled safely. Sale items
 //       snapshot name/price/cost because products get renamed/repriced/deleted
 //       later, and historical reports must reflect what was actually charged.
 //       AppData keeps the DB out of read-only Program Files.
@@ -153,6 +156,7 @@ private:
 
     QSqlDatabase db;
     QString lastError;
+    bool initialized = false;   // guards against repeated initialize() calls
 
     bool createTables();
     bool ensureColumn(const QString &table, const QString &column,

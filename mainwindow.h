@@ -60,6 +60,9 @@ class CartModel;
 class CheckoutService;
 class ProductGridModel;
 class ProductFilterProxy;
+class InventoryDialog;
+class SalesHistoryDialog;
+class QStackedWidget;
 
 // -----------------------------------------------------------------------------
 // MainWindow
@@ -93,18 +96,22 @@ private:
     bool isDarkMode     { false };
 
     // ── UI — products panel (model/view, see productgridmodel.h) ───────────
-    QGroupBox          *productsPanel { nullptr };
-    QListView          *productView   { nullptr };
-    ProductGridModel   *productModel  { nullptr };
-    ProductFilterProxy *productProxy  { nullptr };
-    QLineEdit          *searchEdit    { nullptr };
-    QComboBox          *categoryCombo { nullptr };
+    QGroupBox          *productsPanel  { nullptr };
+    QStackedWidget     *productStack   { nullptr };  // grid <-> empty placeholder
+    QListView          *productView    { nullptr };
+    QLabel             *productEmpty    { nullptr };
+    ProductGridModel   *productModel   { nullptr };
+    ProductFilterProxy *productProxy   { nullptr };
+    QLineEdit          *searchEdit     { nullptr };
+    QComboBox          *categoryCombo  { nullptr };
 
     // ── UI — cart panel ─────────────────────────────────────────────────────
     QGroupBox    *cartPanel         { nullptr };
     QWidget      *cartSelectorWidget{ nullptr };
     QTabWidget   *cartTabWidget     { nullptr };
+    QStackedWidget *cartStack       { nullptr };  // table <-> empty placeholder
     QTableView   *cartTable         { nullptr };
+    QLabel       *cartEmpty         { nullptr };
     CartModel    *cartModel         { nullptr };
     QGroupBox    *totalsGroup       { nullptr };
     QVBoxLayout  *actionsLayout     { nullptr };
@@ -151,6 +158,12 @@ private:
     // ── Barcode reader init ─────────────────────────────────────────────────
     void initBarcodeReader();
 
+    // Non-critical startup work (messaging/schedule, inventory polling, barcode
+    // scanner) run one event-loop tick after show() so the cashier sees the
+    // product grid immediately instead of waiting on a (possibly blocking)
+    // serial-port open or provider wiring.
+    void runDeferredStartup();
+
     // ── Data helpers ────────────────────────────────────────────────────────
     void loadProducts();
     void updateTotals();
@@ -171,6 +184,15 @@ private:
     // Only one toast at a time; a new scan replaces the previous one so rapid
     // scans don't stack overlapping labels.
     QPointer<QLabel> m_toast;
+
+    // Modeless reference dialogs — single instance each, so the cashier can
+    // keep inventory / sales history open while ringing up a sale.
+    QPointer<InventoryDialog>    m_inventoryDlg;
+    QPointer<SalesHistoryDialog> m_salesHistoryDlg;
+
+    // Toggle the grid/cart between content and an empty-state placeholder.
+    void updateProductEmptyState();
+    void updateCartEmptyState();
 
 private slots:
     // ── Barcode ─────────────────────────────────────────────────────────────

@@ -13,6 +13,7 @@
 #include "inventorymanager.h"
 #include "database.h"
 #include "colorscheme.h"
+#include "cart.h"          // formatMoney(), currencySymbol()
 #include <QMessageBox>
 #include <QInputDialog>
 #include <QFileDialog>
@@ -194,7 +195,7 @@ void StockManager::createSummarySection()
     lowStockCountLabel = new QLabel("Low Stock: 0", this);
     criticalStockCountLabel = new QLabel("Critical: 0", this);
     outOfStockCountLabel = new QLabel("Out of Stock: 0", this);
-    totalValueLabel = new QLabel("Total Value: $0.00", this);
+    totalValueLabel = new QLabel("Total Value: " + formatMoney(0), this);
 
     // Style labels — size/weight via properties, colour via kind selectors
     const auto styleStat = [](QLabel *l) {
@@ -402,7 +403,7 @@ void StockManager::populateTable(const QVector<InventoryInfo> &items)
         stockTable->setItem(row, 7, supplierItem);
 
         // Unit Price
-        QTableWidgetItem *priceItem = new QTableWidgetItem(QString("$%1").arg(price, 0, 'f', 2));
+        QTableWidgetItem *priceItem = new QTableWidgetItem(formatMoney(price));
         priceItem->setTextAlignment(Qt::AlignRight | Qt::AlignVCenter);
         stockTable->setItem(row, 8, priceItem);
     }
@@ -440,7 +441,7 @@ void StockManager::updateSummary()
     lowStockCountLabel->setText(QString("Low Stock: %1").arg(lowCount));
     criticalStockCountLabel->setText(QString("Critical: %1").arg(criticalCount));
     outOfStockCountLabel->setText(QString("Out of Stock: %1").arg(outOfStockCount));
-    totalValueLabel->setText(QString("Total Value: $%1").arg(totalValue, 0, 'f', 2));
+    totalValueLabel->setText("Total Value: " + formatMoney(totalValue));
 }
 
 // ============================================================================
@@ -668,7 +669,7 @@ void StockManager::showProductDialog(int productId)
     QDoubleSpinBox *costSpin = new QDoubleSpinBox(&dlg);
     costSpin->setRange(0.0, 9999999.0);
     costSpin->setDecimals(2);
-    costSpin->setPrefix("KSh ");
+    costSpin->setPrefix(currencySymbol() + " ");
     costSpin->setMinimumHeight(32);
     if (isEdit) costSpin->setValue(product.costPrice);
     form->addRow("Cost Price *:", costSpin);
@@ -690,7 +691,7 @@ void StockManager::showProductDialog(int productId)
     priceDisplay->setProperty("bold", "true");
     auto updatePrice = [&]() {
         double sp = Product::calculateSellingPrice(costSpin->value(), marginSpin->value());
-        priceDisplay->setText(QString("KSh %1").arg(sp, 0, 'f', 2));
+        priceDisplay->setText(formatMoney(sp));
     };
     QObject::connect(costSpin,   QOverload<double>::of(&QDoubleSpinBox::valueChanged), updatePrice);
     QObject::connect(marginSpin, QOverload<double>::of(&QDoubleSpinBox::valueChanged), updatePrice);

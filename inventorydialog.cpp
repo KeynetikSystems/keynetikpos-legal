@@ -16,6 +16,7 @@
 #include "database.h"
 #include "colorscheme.h"
 #include "appstyle.h"
+#include "cart.h"          // formatMoney(), currencySymbol()
 #include <QVBoxLayout>
 #include <QHBoxLayout>
 #include <QHeaderView>
@@ -230,7 +231,8 @@ void InventoryDialog::setupOverviewTab()
     inventoryTable = new QTableWidget();
     inventoryTable->setColumnCount(7);
     inventoryTable->setHorizontalHeaderLabels(
-        {"ID", "Product", "Category", "Barcode", "Price (KSh)", "Stock", "Status"});
+        {"ID", "Product", "Category", "Barcode",
+         QString("Price (%1)").arg(currencySymbol()), "Stock", "Status"});
     inventoryTable->setSelectionBehavior(QAbstractItemView::SelectRows);
     inventoryTable->setSelectionMode(QAbstractItemView::SingleSelection);
     inventoryTable->setEditTriggers(QAbstractItemView::NoEditTriggers);
@@ -410,7 +412,7 @@ void InventoryDialog::setupAnalyticsTab()
 
     QGroupBox *totalValueCard = new QGroupBox("Total Inventory Value");
     QVBoxLayout *totalValueLayout = new QVBoxLayout(totalValueCard);
-    totalValueLabel = new QLabel("KSh 0.00");
+    totalValueLabel = new QLabel(formatMoney(0));
     totalValueLabel->setProperty("role", "statValue");
     totalValueLabel->setProperty("kind", "success");
     totalValueLabel->setAlignment(Qt::AlignCenter);
@@ -1260,7 +1262,7 @@ void InventoryDialog::showNotification(const QString &message, NotificationType 
 
 QString InventoryDialog::formatCurrency(double amount)
 {
-    return QString("KSh %L1").arg(amount, 0, 'f', 2);
+    return formatMoney(amount);
 }
 
 void InventoryDialog::keyPressEvent(QKeyEvent *event)

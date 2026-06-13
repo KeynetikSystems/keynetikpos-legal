@@ -13,6 +13,7 @@
 #include "analyticsdialog.h"
 #include "analyticsmanager.h"
 #include "appstyle.h"
+#include "cart.h"          // formatMoney()
 #include <QDebug>
 #include <QApplication>
 #include <QPalette>
@@ -108,13 +109,13 @@ void AnalyticsDialog::setupUi()
 
         int r = 0;
         grid->addWidget(makeKey("Today's Revenue:"), r, 0);
-        todayRevenueLabel = makeVal("$0.00");
+        todayRevenueLabel = makeVal(formatMoney(0));
         todayRevenueLabel->setProperty("kind", "success");
         todayRevenueLabel->setProperty("role", "statValueLg");
         grid->addWidget(todayRevenueLabel, r++, 1);
 
         grid->addWidget(makeKey("Change vs Yesterday:"), r, 0);
-        todayChangeLabel = new QLabel("$0.00 vs yesterday", tab);
+        todayChangeLabel = new QLabel(formatMoney(0) + " vs yesterday", tab);
         todayChangeLabel->setProperty("bold", "true");
         grid->addWidget(todayChangeLabel, r++, 1);
 
@@ -124,15 +125,15 @@ void AnalyticsDialog::setupUi()
         grid->addWidget(sep, r++, 0, 1, 2);
 
         grid->addWidget(makeKey("Yesterday:"), r, 0);
-        yesterdayRevenueLabel = makeVal("$0.00");
+        yesterdayRevenueLabel = makeVal(formatMoney(0));
         grid->addWidget(yesterdayRevenueLabel, r++, 1);
 
         grid->addWidget(makeKey("This Week:"), r, 0);
-        weekRevenueLabel = makeVal("$0.00");
+        weekRevenueLabel = makeVal(formatMoney(0));
         grid->addWidget(weekRevenueLabel, r++, 1);
 
         grid->addWidget(makeKey("This Month:"), r, 0);
-        monthRevenueLabel = makeVal("$0.00");
+        monthRevenueLabel = makeVal(formatMoney(0));
         grid->addWidget(monthRevenueLabel, r++, 1);
 
         auto *sep2 = new QFrame(tab);
@@ -189,7 +190,7 @@ void AnalyticsDialog::setupUi()
         grid->addWidget(weekTransactionsLabel, r++, 1);
 
         grid->addWidget(makeKey("Avg Transaction Value:"), r, 0);
-        avgTransactionLabel = makeVal("$0.00");
+        avgTransactionLabel = makeVal(formatMoney(0));
         avgTransactionLabel->setProperty("kind", "tertiary");
         grid->addWidget(avgTransactionLabel, r++, 1);
 
@@ -630,7 +631,7 @@ QString AnalyticsDialog::buildInfoBox(const QString &title,
 
 QString AnalyticsDialog::formatCurrency(double amount) const
 {
-    return QString("$%1").arg(amount, 0, 'f', 2);
+    return formatMoney(amount);
 }
 
 QString AnalyticsDialog::getChangeKind(double change) const

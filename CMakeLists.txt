@@ -52,6 +52,7 @@ set(PROJECT_SOURCES
     cartmodel.cpp cartmodel.h
     productgridmodel.cpp productgridmodel.h
     checkoutservice.cpp checkoutservice.h
+    carttotals.cpp carttotals.h
     providersetup.cpp providersetup.h
     appstyle.cpp appstyle.h
     discountdialog.cpp discountdialog.h
@@ -217,4 +218,32 @@ endif() # LICENSE_FILE exists
 
 if(QT_VERSION_MAJOR EQUAL 6)
     qt_finalize_executable(KeynetikPOS)
+endif()
+
+# ============================================================
+# Tests (QtTest) — unit tests for the pure money math.
+# Build with -DKEYNETIK_BUILD_TESTS=ON (default), run with ctest.
+# The test target links ONLY carttotals.cpp (dependency-free), so it
+# never drags in the DB/UI and stays fast to build and run.
+# ============================================================
+option(KEYNETIK_BUILD_TESTS "Build KeynetikPOS unit tests" ON)
+if(KEYNETIK_BUILD_TESTS)
+    find_package(Qt${QT_VERSION_MAJOR} REQUIRED COMPONENTS Test)
+    enable_testing()
+
+    add_executable(carttotals_test
+        tests/carttotals_test.cpp
+        carttotals.cpp carttotals.h
+    )
+    set_target_properties(carttotals_test PROPERTIES AUTOMOC ON)
+    target_include_directories(carttotals_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+    # Qt::Sql is linked only so settingsmanager.h's <QSqlDatabase> include
+    # resolves when carttotals.cpp pulls in BusinessSettings — the test uses no
+    # database itself.
+    target_link_libraries(carttotals_test PRIVATE
+        Qt${QT_VERSION_MAJOR}::Core
+        Qt${QT_VERSION_MAJOR}::Sql
+        Qt${QT_VERSION_MAJOR}::Test
+    )
+    add_test(NAME carttotals_test COMMAND carttotals_test)
 endif()

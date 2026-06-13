@@ -146,13 +146,13 @@ QWidget *SettingsDialog::buildBusinessTab()
     curForm->setLabelAlignment(Qt::AlignRight | Qt::AlignVCenter);
 
     m_currency = new QLineEdit(curGroup);
-    m_currency->setPlaceholderText("$");
+    m_currency->setPlaceholderText("KSh");
     m_currency->setMaxLength(4);
     m_currency->setFixedWidth(70);
     curForm->addRow("Symbol:", m_currency);
 
     m_currencyCode = new QLineEdit(curGroup);
-    m_currencyCode->setPlaceholderText("USD");
+    m_currencyCode->setPlaceholderText("KES");
     m_currencyCode->setMaxLength(5);
     m_currencyCode->setFixedWidth(80);
     curForm->addRow("Code:", m_currencyCode);
@@ -524,7 +524,7 @@ void SettingsDialog::save()
     s.phone          = m_phone->text().trimmed();
     s.email          = m_email->text().trimmed();
     s.website        = m_website->text().trimmed();
-    s.currencySymbol = m_currency->text().trimmed().isEmpty() ? "$" : m_currency->text().trimmed();
+    s.currencySymbol = m_currency->text().trimmed().isEmpty() ? "KSh" : m_currency->text().trimmed();
     s.currencyCode   = m_currencyCode->text().trimmed().toUpper();
 
     s.taxEnabled     = m_taxEnabled->isChecked();

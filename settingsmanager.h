@@ -32,8 +32,8 @@ struct BusinessSettings {
     QString email            = "";
     QString website          = "";
     QString receiptFooter    = "Thank you for your business!";
-    QString currencySymbol   = "$";
-    QString currencyCode     = "USD";
+    QString currencySymbol   = "KSh";
+    QString currencyCode     = "KES";
 
     // Tax
     bool    taxEnabled       = false;

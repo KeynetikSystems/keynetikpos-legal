@@ -13,6 +13,7 @@
 #include "analyticsdashboard.h"
 #include "colorscheme.h"
 #include "database.h"
+#include "cart.h"          // formatMoney()
 #include <QVBoxLayout>
 #include <QHBoxLayout>
 #include <QGridLayout>
@@ -33,12 +34,7 @@
 // ─────────────────────────────────────────────────────────────────────────────
 namespace {
 
-// Eliminate floating-point dust at the 2-decimal boundary.
-// e.g.  869.9499999... → 869.95,  -0.000000001 → 0.00
-inline double roundCents(double v)
-{
-    return std::round(v * 100.0) / 100.0;
-}
+// roundCents() / formatMoney() come from cart.h (single source of truth).
 
 } // anonymous namespace
 
@@ -163,13 +159,13 @@ void AnalyticsDashboard::setupMetricsSection()
 
     // Row 0
     QGroupBox *salesCard = new QGroupBox("Total Sales");
-    totalSalesLabel = makeMetricLabel("KSh 0.00", "statValueLg", "success");
+    totalSalesLabel = makeMetricLabel(formatMoney(0), "statValueLg", "success");
     (new QVBoxLayout(salesCard))->addWidget(totalSalesLabel);
     metricsLayout->addWidget(salesCard, 0, 0);
 
     QGroupBox *profitCard = new QGroupBox("Gross Profit");
     QVBoxLayout *pl = new QVBoxLayout(profitCard);
-    profitLabel = makeMetricLabel("KSh 0.00", "statValueLg", "success");
+    profitLabel = makeMetricLabel(formatMoney(0), "statValueLg", "success");
     pl->addWidget(profitLabel);
     profitMarginLabel = new QLabel("Margin: 0%");
     profitMarginLabel->setProperty("kind", "secondary");
@@ -183,18 +179,18 @@ void AnalyticsDashboard::setupMetricsSection()
     metricsLayout->addWidget(transCard, 0, 2);
 
     QGroupBox *avgCard = new QGroupBox("Avg Transaction");
-    avgTransactionLabel = makeMetricLabel("KSh 0.00", "statValueLg", "tertiary");
+    avgTransactionLabel = makeMetricLabel(formatMoney(0), "statValueLg", "tertiary");
     (new QVBoxLayout(avgCard))->addWidget(avgTransactionLabel);
     metricsLayout->addWidget(avgCard, 0, 3);
 
     // Row 1
     QGroupBox *taxCard = new QGroupBox("Tax Collected");
-    taxCollectedLabel = makeMetricLabel("KSh 0.00", "statValue", "secondary");
+    taxCollectedLabel = makeMetricLabel(formatMoney(0), "statValue", "secondary");
     (new QVBoxLayout(taxCard))->addWidget(taxCollectedLabel);
     metricsLayout->addWidget(taxCard, 1, 0);
 
     QGroupBox *discountCard = new QGroupBox("Discounts Given");
-    discountsLabel = makeMetricLabel("KSh 0.00", "statValue", "secondary");
+    discountsLabel = makeMetricLabel(formatMoney(0), "statValue", "secondary");
     (new QVBoxLayout(discountCard))->addWidget(discountsLabel);
     metricsLayout->addWidget(discountCard, 1, 1);
 
@@ -664,8 +660,9 @@ void AnalyticsDashboard::onQuickRangeSelected(const QString &range)
 
 QString AnalyticsDashboard::formatCurrency(double amount)
 {
-    // roundCents() here as final safety net — prevents "KSh -0.00" etc.
-    return QString("KSh %1").arg(roundCents(amount), 0, 'f', 2);
+    // formatMoney() applies roundCents() (prevents "KSh -0.00") and the
+    // configured currency symbol.
+    return formatMoney(amount);
 }
 
 QString AnalyticsDashboard::formatPercentage(double value)

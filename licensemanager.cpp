@@ -41,7 +41,10 @@
 static const QString SERVER_URL  = "https://keynetik-license.kelvinyabate.workers.dev";  // Cloudflare Worker (see license-server/)
 static const QString REG_ORG     = "KeynetikSolutions";
 static const QString REG_APP     = "KeynetikPOS";
-static const QString TAMPER_SALT = "KNK-TAMPER-2025";              // ← keep secret
+// NOTE: This salt ships inside the binary, so it is obfuscation, not a secret —
+// it raises the bar for casual registry edits but cannot stop a real attacker.
+// The authoritative anti-tamper signal is the server-side revoke check.
+static const QString TAMPER_SALT = "KNK-TAMPER-2025";
 
 // ════════════════════════════════════════════════════════════════
 // SINGLETON
@@ -218,6 +221,13 @@ bool LicenseManager::verifyRegistryHash() const {
 
 // ════════════════════════════════════════════════════════════════
 // OFFLINE KEY FORMAT VALIDATION
+// ────────────────────────────────────────────────────────────────
+// This is a lightweight FORMAT/checksum gate, NOT a security boundary.
+// The salt below is compiled into the binary and the check is purely local,
+// so a determined attacker can mint keys that pass it. That is acceptable
+// because the SERVER is the real authority: activateOnServer() and the
+// heartbeat decide whether a key is genuine, active, and not revoked. Treat
+// validateKey() only as a fast "is this even shaped like a key" filter.
 // ════════════════════════════════════════════════════════════════
 bool LicenseManager::validateKey(const QString& key) const {
     QString clean = key.toUpper().remove('-').trimmed();

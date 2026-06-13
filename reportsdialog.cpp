@@ -9,6 +9,7 @@
 //    of the table through QTextDocument/QPrinter.
 // =============================================================================
 #include "reportsdialog.h"
+#include "cart.h"          // formatMoney()
 #include <QVBoxLayout>
 #include <QHBoxLayout>
 #include <QGroupBox>
@@ -175,10 +176,10 @@ void ReportsDialog::generateSalesByDateReport()
         reportData.append(rowData);
     }
 
-    summaryLabel->setText(QString("Total Sales: KSh %1 | Total Tax: KSh %2 | Total Discount: KSh %3 | Transactions: %4")
-                              .arg(totalSales, 0, 'f', 2)
-                              .arg(totalTax, 0, 'f', 2)
-                              .arg(totalDiscount, 0, 'f', 2)
+    summaryLabel->setText(QString("Total Sales: %1 | Total Tax: %2 | Total Discount: %3 | Transactions: %4")
+                              .arg(formatMoney(totalSales),
+                                   formatMoney(totalTax),
+                                   formatMoney(totalDiscount))
                               .arg(sales.size()));
 }
 
@@ -219,7 +220,7 @@ void ReportsDialog::generateSalesByCategoryReport()
         reportData.append(rowData);
     }
 
-    summaryLabel->setText(QString("Total Sales Across All Categories: KSh %1").arg(grandTotal, 0, 'f', 2));
+    summaryLabel->setText(QString("Total Sales Across All Categories: %1").arg(formatMoney(grandTotal)));
 }
 
 void ReportsDialog::generateSalesByPaymentReport()
@@ -255,7 +256,7 @@ void ReportsDialog::generateSalesByPaymentReport()
         reportData.append(rowData);
     }
 
-    summaryLabel->setText(QString("Total Sales Across All Payment Methods: KSh %1").arg(grandTotal, 0, 'f', 2));
+    summaryLabel->setText(QString("Total Sales Across All Payment Methods: %1").arg(formatMoney(grandTotal)));
 }
 
 void ReportsDialog::generateTopSellingProductsReport()
@@ -323,8 +324,8 @@ void ReportsDialog::generateDailySalesReport()
         reportData.append(rowData);
     }
 
-    summaryLabel->setText(QString("Total Sales: KSh %1 | Total Transactions: %2")
-                              .arg(grandTotal, 0, 'f', 2)
+    summaryLabel->setText(QString("Total Sales: %1 | Total Transactions: %2")
+                              .arg(formatMoney(grandTotal))
                               .arg(sales.size()));
 }
 

@@ -10,6 +10,7 @@
 //    accepted amount/reason are stored on the active Cart by the caller.
 // =============================================================================
 #include "discountdialog.h"
+#include "cart.h"          // formatMoney(), currencySymbol()
 #include <QVBoxLayout>
 #include <QHBoxLayout>
 #include <QGroupBox>
@@ -36,7 +37,7 @@ void DiscountDialog::setupUI()
     QVBoxLayout *mainLayout = new QVBoxLayout(this);
 
     // Subtotal display
-    QLabel *subtotalLabel = new QLabel(QString("Subtotal: KSh %1").arg(subtotal, 0, 'f', 2));
+    QLabel *subtotalLabel = new QLabel("Subtotal: " + formatMoney(subtotal));
     subtotalLabel->setProperty("role", "banner");
     subtotalLabel->setProperty("kind", "info");
     subtotalLabel->setProperty("textScale", "xl");
@@ -58,7 +59,7 @@ void DiscountDialog::setupUI()
     discountTypeGroup->addButton(percentageRadio, 0);
     typeLayout->addWidget(percentageRadio);
 
-    fixedRadio = new QRadioButton("Fixed Amount (KSh)");
+    fixedRadio = new QRadioButton(QString("Fixed Amount (%1)").arg(currencySymbol()));
     fixedRadio->setProperty("textScale", "md");
     fixedRadio->setAccessibleName("Discount as a fixed amount");
     discountTypeGroup->addButton(fixedRadio, 1);
@@ -93,13 +94,13 @@ void DiscountDialog::setupUI()
     mainLayout->addSpacing(10);
 
     // Discount summary
-    discountAmountLabel = new QLabel("Discount Amount: KSh 0.00");
+    discountAmountLabel = new QLabel("Discount Amount: " + formatMoney(0));
     discountAmountLabel->setProperty("kind", "warning");
     discountAmountLabel->setProperty("textScale", "lg");
     discountAmountLabel->setProperty("bold", "true");
     mainLayout->addWidget(discountAmountLabel);
 
-    newTotalLabel = new QLabel(QString("New Total: KSh %1").arg(subtotal, 0, 'f', 2));
+    newTotalLabel = new QLabel("New Total: " + formatMoney(subtotal));
     newTotalLabel->setProperty("kind", "success");
     newTotalLabel->setProperty("textScale", "xl");
     newTotalLabel->setProperty("bold", "true");
@@ -163,8 +164,8 @@ void DiscountDialog::calculateDiscount()
 
     double newTotal = subtotal - discountAmount;
 
-    discountAmountLabel->setText(QString("Discount Amount: KSh %1").arg(discountAmount, 0, 'f', 2));
-    newTotalLabel->setText(QString("New Total: KSh %1").arg(newTotal, 0, 'f', 2));
+    discountAmountLabel->setText("Discount Amount: " + formatMoney(discountAmount));
+    newTotalLabel->setText("New Total: " + formatMoney(newTotal));
 }
 
 void DiscountDialog::onApplyClicked()

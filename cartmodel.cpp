@@ -76,9 +76,11 @@ QVariant CartModel::data(const QModelIndex &index, int role) const
     case Qt::DisplayRole:
         switch (index.column()) {
         case ColProduct:  return item.name;
-        case ColPrice:    return formatKsh(item.price);
+        case ColPrice:    return formatMoney(item.price);
+        case ColDec:      return QStringLiteral("−");
         case ColQty:      return item.quantity;
-        case ColSubtotal: return formatKsh(item.getSubtotal());
+        case ColInc:      return QStringLiteral("＋");
+        case ColSubtotal: return formatMoney(item.getSubtotal());
         case ColRemove:   return QStringLiteral("✖");
         }
         break;
@@ -89,12 +91,17 @@ QVariant CartModel::data(const QModelIndex &index, int role) const
         break;
 
     case Qt::TextAlignmentRole:
-        if (index.column() == ColQty || index.column() == ColRemove)
-            return int(Qt::AlignCenter);
+        switch (index.column()) {
+        case ColQty:
+        case ColDec:
+        case ColInc:
+        case ColRemove: return int(Qt::AlignCenter);
+        }
         break;
 
     case Qt::FontRole:
-        if (index.column() == ColProduct) {
+        if (index.column() == ColProduct ||
+            index.column() == ColDec || index.column() == ColInc) {
             QFont f;
             f.setBold(true);
             return f;
@@ -104,10 +111,14 @@ QVariant CartModel::data(const QModelIndex &index, int role) const
     case Qt::ForegroundRole:
         if (index.column() == ColRemove)
             return QBrush(QColor(getColorScheme().error));
+        if (index.column() == ColDec || index.column() == ColInc)
+            return QBrush(QColor(getColorScheme().accentPrimary));
         break;
 
     case Qt::ToolTipRole:
-        if (index.column() == ColQty)    return QStringLiteral("Double-click to edit quantity");
+        if (index.column() == ColDec)    return QStringLiteral("Decrease quantity");
+        if (index.column() == ColInc)    return QStringLiteral("Increase quantity");
+        if (index.column() == ColQty)    return QStringLiteral("Tap − / ＋ or double-click to edit quantity");
         if (index.column() == ColRemove) return QStringLiteral("Remove item");
         break;
 
@@ -126,7 +137,9 @@ QVariant CartModel::headerData(int section, Qt::Orientation orientation,
     switch (section) {
     case ColProduct:  return QStringLiteral("Product");
     case ColPrice:    return QStringLiteral("Price");
+    case ColDec:      return QString();
     case ColQty:      return QStringLiteral("Qty");
+    case ColInc:      return QString();
     case ColSubtotal: return QStringLiteral("Subtotal");
     case ColRemove:   return QString();
     }
@@ -162,6 +175,16 @@ bool CartModel::setData(const QModelIndex &index, const QVariant &value,
     emit dataChanged(this->index(index.row(), ColQty),
                      this->index(index.row(), ColSubtotal));
     return true;
+}
+
+void CartModel::adjustQuantity(int row, int delta)
+{
+    const Cart *cart = currentCart(m_service);
+    if (!cart || row < 0 || row >= cart->items.size())
+        return;
+    // Reuse setData()'s clamping so the − / + taps and the spin editor behave
+    // identically. Decrementing past 1 is a no-op; ✖ removes a line.
+    setData(index(row, ColQty), cart->items[row].quantity + delta, Qt::EditRole);
 }
 
 // =============================================================================
