@@ -1,0 +1,220 @@
+cmake_minimum_required(VERSION 3.16)
+project(KeynetikPOS VERSION 2.0.0 LANGUAGES CXX)
+
+set(CMAKE_AUTOUIC ON)
+set(CMAKE_AUTOMOC ON)
+set(CMAKE_AUTORCC ON)
+set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+
+# ============================================================
+# Find Qt
+# ============================================================
+find_package(QT NAMES Qt6 Qt5 REQUIRED COMPONENTS Widgets Core Sql PrintSupport Network)
+find_package(Qt${QT_VERSION_MAJOR} REQUIRED COMPONENTS Widgets Core Sql PrintSupport Network)
+find_package(Qt${QT_VERSION_MAJOR} REQUIRED COMPONENTS SerialPort)
+
+# ============================================================
+# App Metadata
+# ============================================================
+set(APP_NAME "KeynetikPOS")
+set(APP_VERSION "2.0.0")
+set(APP_PUBLISHER "Keynetik Solutions")
+set(APP_DESCRIPTION "Next-GEN Professional Point of Sale System")
+set(APP_URL "https://www.keynetik.com")
+
+# ============================================================
+# Resources
+# ============================================================
+set(WINDOWS_RC_FILE "")
+if(WIN32)
+    set(RC_SOURCE "${CMAKE_CURRENT_SOURCE_DIR}/resources/app.rc")
+    if(EXISTS "${RC_SOURCE}")
+        set(WINDOWS_RC_FILE "${RC_SOURCE}")
+    endif()
+endif()
+
+set(QT_RESOURCE_FILE "")
+if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/resources/resources.qrc")
+    set(QT_RESOURCE_FILE "resources/resources.qrc")
+endif()
+
+# ============================================================
+# Sources
+# ============================================================
+set(PROJECT_SOURCES
+    main.cpp
+    mainwindow.cpp mainwindow.h
+    database.cpp database.h
+    CartItem.h
+    cart.h
+    cartservice.cpp cartservice.h
+    cartmodel.cpp cartmodel.h
+    productgridmodel.cpp productgridmodel.h
+    checkoutservice.cpp checkoutservice.h
+    providersetup.cpp providersetup.h
+    appstyle.cpp appstyle.h
+    discountdialog.cpp discountdialog.h
+    discount.cpp discount.h
+    reportsdialog.cpp reportsdialog.h
+    paymentdialog.cpp paymentdialog.h
+    paymentmanager.cpp paymentmanager.h
+    inventorymanager.cpp inventorymanager.h
+    inventorydialog.cpp inventorydialog.h
+    analyticsdashboard.cpp analyticsdashboard.h
+    analyticsdialog.cpp analyticsdialog.h
+    analyticsmanager.cpp analyticsmanager.h
+    receiptprinter.cpp receiptprinter.h
+    saleshistorydialog.cpp saleshistorydialog.h
+    colorscheme.cpp colorscheme.h
+    user.cpp user.h
+    usermanager.cpp usermanager.h
+    usermanagementdialog.cpp usermanagementdialog.h
+    logindialog.cpp logindialog.h
+    changepassworddialog.cpp changepassworddialog.h
+    messageprovider.h
+    passwordhasher.h
+    schedulemanager.cpp schedulemanager.h
+    scheduledialog.cpp scheduledialog.h
+    scheduleeditordialog.cpp scheduleeditordialog.h
+    barcodescannermanager.cpp barcodescannermanager.h
+    whatsappmanager.cpp whatsappmanager.h
+    Africatalkingprovider.h
+    shiftmanager.cpp shiftmanager.h
+    shift_dialogs.cpp shift_dialogs.h shift_type.h
+    settingsmanager.cpp settingsmanager.h
+    settingsdialog.cpp settingsdialog.h
+    zreportdialog.cpp zreportdialog.h
+    lowstockdialog.cpp lowstockdialog.h
+    stockmanager.cpp stockmanager.h
+    enhancedanalytics.cpp enhancedanalytics.h
+    MessageSchedule.h
+    licensemanager.h licensemanager.cpp
+    antidebug.h
+    ${QT_RESOURCE_FILE}
+    ${WINDOWS_RC_FILE}
+)
+
+# ============================================================
+# Build
+# ============================================================
+if(${QT_VERSION_MAJOR} GREATER_EQUAL 6)
+    qt_add_executable(KeynetikPOS WIN32 MANUAL_FINALIZATION ${PROJECT_SOURCES}
+        barcodereader.h barcodereader.cpp)
+else()
+    add_executable(KeynetikPOS WIN32 ${PROJECT_SOURCES})
+endif()
+
+target_include_directories(KeynetikPOS PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+
+target_link_libraries(KeynetikPOS PRIVATE
+    Qt${QT_VERSION_MAJOR}::Widgets
+    Qt${QT_VERSION_MAJOR}::Core
+    Qt${QT_VERSION_MAJOR}::Sql
+    Qt${QT_VERSION_MAJOR}::PrintSupport
+    Qt${QT_VERSION_MAJOR}::Network
+)
+target_link_libraries(KeynetikPOS PRIVATE Qt${QT_VERSION_MAJOR}::SerialPort)
+
+# ============================================================
+# Deployment Logic (windeployqt)
+# ============================================================
+if(WIN32)
+    find_program(WINDEPLOYQT_EXECUTABLE windeployqt
+        HINTS "${Qt${QT_VERSION_MAJOR}_DIR}/../../../bin")
+    if(WINDEPLOYQT_EXECUTABLE)
+        set(DEPLOY_DIR "${CMAKE_BINARY_DIR}/windeployqt_stage")
+        add_custom_command(TARGET KeynetikPOS POST_BUILD
+            COMMAND ${CMAKE_COMMAND} -E remove_directory "${DEPLOY_DIR}"
+            COMMAND ${CMAKE_COMMAND} -E make_directory "${DEPLOY_DIR}"
+            COMMAND ${CMAKE_COMMAND} -E copy
+                "$<TARGET_FILE:KeynetikPOS>" "${DEPLOY_DIR}/KeynetikPOS.exe"
+            COMMAND "${WINDEPLOYQT_EXECUTABLE}"
+                --no-translations --no-system-d3d-compiler
+                "${DEPLOY_DIR}/KeynetikPOS.exe"
+            VERBATIM
+        )
+    endif()
+endif()
+
+# ============================================================
+# Installation
+# ============================================================
+include(GNUInstallDirs)
+if(WIN32 AND WINDEPLOYQT_EXECUTABLE)
+    install(DIRECTORY "${DEPLOY_DIR}/" DESTINATION "." USE_SOURCE_PERMISSIONS)
+else()
+    install(TARGETS KeynetikPOS RUNTIME DESTINATION ".")
+endif()
+
+# ============================================================
+# CPack Setup
+# ============================================================
+set(LICENSE_FILE "${CMAKE_CURRENT_SOURCE_DIR}/LICENSE.txt")
+if(EXISTS "${LICENSE_FILE}")
+    set(CPACK_PACKAGE_NAME "${APP_NAME}")
+    set(CPACK_PACKAGE_VENDOR "${APP_PUBLISHER}")
+    set(CPACK_PACKAGE_VERSION "${APP_VERSION}")
+    set(CPACK_PACKAGE_INSTALL_DIRECTORY "${APP_NAME}")
+    set(CPACK_RESOURCE_FILE_LICENSE "${LICENSE_FILE}")
+    set(CPACK_PACKAGE_FILE_NAME "${APP_NAME}-${APP_VERSION}-Setup")
+
+    if(WIN32)
+        set(CPACK_GENERATOR "NSIS")
+        set(CPACK_NSIS_DISPLAY_NAME "${APP_NAME} ${APP_VERSION}")
+        set(CPACK_NSIS_PACKAGE_NAME "${APP_NAME}")
+        set(CPACK_NSIS_URL_INFO_ABOUT "${APP_URL}")
+        set(CPACK_NSIS_CONTACT "support@keynetik.com")
+
+        # ── Icon (only set if the file actually exists) ──────────────
+        set(_ICO "${CMAKE_SOURCE_DIR}/resources/app.ico")
+        if(EXISTS "${_ICO}")
+            # NSIS needs a native Windows path with forward slashes
+            file(TO_NATIVE_PATH "${_ICO}" _ICO_NATIVE)
+            # CMake stores native paths with backslashes; convert them so
+            # the string reaches NSIS correctly (NSIS uses forward slashes
+            # in most contexts but accepts both – use forward slashes to
+            # stay safe inside CMake string handling).
+            string(REPLACE "\\" "/" _ICO_FWD "${_ICO_NATIVE}")
+            set(CPACK_NSIS_MUI_ICON    "${_ICO_FWD}")
+            set(CPACK_NSIS_MUI_UNIICON "${_ICO_FWD}")
+        endif()
+
+        # ── Shortcuts created during install ─────────────────────────
+        # CPACK_NSIS_CREATE_ICONS_EXTRA is raw NSIS script injected into
+        # the installer Section.  Use NSIS variables ($SMPROGRAMS etc.)
+        # with their own backslash syntax – but we must escape each
+        # backslash as \\ so CMake doesn't treat them as escape sequences.
+        set(CPACK_NSIS_CREATE_ICONS_EXTRA
+            "CreateDirectory '$SMPROGRAMS\\\\${APP_NAME}'
+             CreateShortCut  '$SMPROGRAMS\\\\${APP_NAME}\\\\${APP_NAME}.lnk' '$INSTDIR\\\\KeynetikPOS.exe'
+             CreateShortCut  '$DESKTOP\\\\${APP_NAME}.lnk' '$INSTDIR\\\\KeynetikPOS.exe'")
+
+        # Matching removal script for uninstaller
+        set(CPACK_NSIS_DELETE_ICONS_EXTRA
+            "Delete '$SMPROGRAMS\\\\${APP_NAME}\\\\${APP_NAME}.lnk'
+             Delete '$DESKTOP\\\\${APP_NAME}.lnk'
+             RMDir  '$SMPROGRAMS\\\\${APP_NAME}'")
+
+        # Launch app after install finishes
+        set(CPACK_NSIS_MUI_FINISHPAGE_RUN "KeynetikPOS.exe")
+
+        # ── CD-Key page injected via EXTRA_INSTALL_COMMANDS ──────────
+        # Writing a full custom nsDialogs page through CMake string
+        # variables is error-prone because of nested escaping.  Instead
+        # we use a simpler approach: prompt for the key with a standard
+        # NSIS InputBox via CPACK_NSIS_EXTRA_INSTALL_COMMANDS, which
+        # doesn't require a separate Page declaration and avoids the
+        # escaping nightmare of nsDialogs inside CMake strings.
+        # set(CPACK_NSIS_EXTRA_INSTALL_COMMANDS
+        #     "InputBox 'CD Key' 'Please enter your ${APP_NAME} CD Key:' '' $0
+        #      WriteRegStr HKCU 'Software\\\\${APP_NAME}' 'CDKey' '$0'")
+
+    endif() # WIN32
+
+    include(CPack)
+endif() # LICENSE_FILE exists
+
+if(QT_VERSION_MAJOR EQUAL 6)
+    qt_finalize_executable(KeynetikPOS)
+endif()

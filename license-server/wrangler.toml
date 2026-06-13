@@ -1,0 +1,10 @@
+name = "keynetik-license"
+main = "src/index.js"
+compatibility_date = "2024-09-23"
+
+# Created with:  wrangler d1 create keynetik-license
+# Paste the database_id it prints below, then deploy.
+[[d1_databases]]
+binding = "DB"
+database_name = "keynetik-license"
+database_id = "f94bdca7-0449-44f2-b5e7-ac6f35e5f9f1"

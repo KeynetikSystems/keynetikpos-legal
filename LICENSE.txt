@@ -1,0 +1,193 @@
+END USER LICENSE AGREEMENT (EULA)
+KeynetikPOS - Point of Sale Software
+
+Copyright (c) 2024 Keynetik Solutions, Nakuru, Kenya.
+All rights reserved.
+
+IMPORTANT: PLEASE READ THIS AGREEMENT CAREFULLY BEFORE INSTALLING OR USING
+THIS SOFTWARE. BY INSTALLING, COPYING, OR OTHERWISE USING KEYNETIKPOS, YOU
+AGREE TO BE BOUND BY THE TERMS OF THIS AGREEMENT. IF YOU DO NOT AGREE, DO
+NOT INSTALL OR USE THE SOFTWARE.
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+1. DEFINITIONS
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+"Software"      means the KeynetikPOS application, including all associated
+                files, documentation, and updates provided by Keynetik Solutions.
+
+"License"       means the rights granted to you under this Agreement.
+
+"Licensee"      means the individual or business entity that has purchased
+                and installed the Software.
+
+"Permitted Installation" means a single physical or virtual machine on which
+                the Software is installed and actively used.
+
+
+2. GRANT OF LICENSE
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Subject to your payment of the applicable license fee and compliance with
+this Agreement, Keynetik Solutions grants you a non-exclusive,
+non-transferable, perpetual license to:
+
+  a) Install and use one (1) copy of the Software on one (1) Permitted
+     Installation per license purchased.
+
+  b) Make one (1) backup copy of the Software solely for archival purposes.
+
+  c) Use the Software for your internal business operations at the licensed
+     business location(s).
+
+MULTI-TERMINAL USE: If you operate multiple POS terminals or business
+locations, you must purchase a separate license for each terminal or
+location. Volume pricing is available — contact support@keynetik.com.
+
+
+3. RESTRICTIONS
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+You may NOT:
+
+  a) Copy, distribute, sell, sublicense, rent, lease, or lend the Software
+     to any third party without prior written consent from Keynetik Solutions.
+
+  b) Reverse engineer, decompile, disassemble, or attempt to derive the
+     source code of the Software, except to the extent expressly permitted
+     by applicable law.
+
+  c) Modify, adapt, translate, or create derivative works based on the
+     Software.
+
+  d) Remove, alter, or obscure any proprietary notices, labels, or marks
+     on the Software.
+
+  e) Use the Software to provide time-sharing, hosted, or service bureau
+     services to third parties.
+
+  f) Install or use the Software on more machines than the number of
+     licenses purchased.
+
+
+4. OWNERSHIP
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+The Software is licensed, not sold. Keynetik Solutions retains all right,
+title, and interest in and to the Software, including all intellectual
+property rights therein. This Agreement does not grant you any rights to
+trademarks, service marks, or trade names of Keynetik Solutions.
+
+
+5. UPDATES AND SUPPORT
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  a) Your one-time purchase includes all minor updates (e.g. 1.0.x to 1.x.x)
+     released within twelve (12) months of your purchase date.
+
+  b) Major version upgrades (e.g. version 1.x to version 2.x) may be offered
+     at a discounted upgrade price.
+
+  c) Technical support is provided via email at support@keynetik.com.
+     Response times are best-effort and not guaranteed under this Agreement.
+
+  d) Keynetik Solutions reserves the right to discontinue support for older
+     versions with reasonable prior notice.
+
+
+6. YOUR DATA
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  a) All business data you create using the Software (sales records,
+     inventory, customer data) remains solely your property.
+
+  b) The Software stores data locally on your machine. Keynetik Solutions
+     does not collect, access, or transmit your business data.
+
+  c) You are solely responsible for maintaining backups of your data.
+     Keynetik Solutions accepts no liability for data loss.
+
+
+7. THIRD-PARTY COMPONENTS
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+This application uses Qt (https://www.qt.io), which is licensed under the
+GNU Lesser General Public License (LGPL) version 3.
+The full text of the LGPL v3 license is available at:
+https://www.gnu.org/licenses/lgpl-3.0.html
+
+Qt is a trademark of The Qt Company Ltd.
+
+In accordance with the LGPL, the Qt libraries are dynamically linked and
+can be replaced by the user with a modified version of Qt.
+
+
+8. DISCLAIMER OF WARRANTIES
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+THE SOFTWARE IS PROVIDED "AS IS" WITHOUT WARRANTY OF ANY KIND. TO THE
+MAXIMUM EXTENT PERMITTED BY APPLICABLE LAW, KEYNETIK SOLUTIONS EXPRESSLY
+DISCLAIMS ALL WARRANTIES, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO
+IMPLIED WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE,
+AND NON-INFRINGEMENT.
+
+KEYNETIK SOLUTIONS DOES NOT WARRANT THAT THE SOFTWARE WILL BE ERROR-FREE,
+UNINTERRUPTED, OR FREE OF VIRUSES OR OTHER HARMFUL COMPONENTS.
+
+
+9. LIMITATION OF LIABILITY
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+TO THE MAXIMUM EXTENT PERMITTED BY APPLICABLE LAW, IN NO EVENT SHALL
+KEYNETIK SOLUTIONS BE LIABLE FOR ANY INDIRECT, INCIDENTAL, SPECIAL,
+CONSEQUENTIAL, OR PUNITIVE DAMAGES, INCLUDING BUT NOT LIMITED TO LOSS OF
+PROFITS, LOSS OF DATA, OR BUSINESS INTERRUPTION, ARISING OUT OF OR IN
+CONNECTION WITH THIS AGREEMENT OR THE USE OF THE SOFTWARE, EVEN IF ADVISED
+OF THE POSSIBILITY OF SUCH DAMAGES.
+
+IN ANY CASE, KEYNETIK SOLUTIONS' TOTAL CUMULATIVE LIABILITY ARISING OUT OF
+OR RELATED TO THIS AGREEMENT SHALL NOT EXCEED THE AMOUNT ACTUALLY PAID BY
+YOU FOR THE SOFTWARE LICENSE.
+
+
+10. TERMINATION
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+This Agreement is effective until terminated. Keynetik Solutions may
+terminate this Agreement immediately upon written notice if you materially
+breach any of its terms. Upon termination:
+
+  a) All rights granted under this Agreement cease immediately.
+  b) You must uninstall and destroy all copies of the Software.
+  c) Sections 4, 6, 8, 9, and 11 shall survive termination.
+
+
+11. GOVERNING LAW
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+This Agreement shall be governed by and construed in accordance with the
+laws of Kenya, without regard to its conflict of law provisions. Any
+disputes arising under this Agreement shall be subject to the exclusive
+jurisdiction of the courts located in Nakuru, Kenya.
+
+
+12. ENTIRE AGREEMENT
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+This Agreement constitutes the entire agreement between you and Keynetik
+Solutions with respect to the Software and supersedes all prior or
+contemporaneous understandings, communications, and agreements, whether
+written or oral, regarding the Software.
+
+If any provision of this Agreement is held to be unenforceable, that
+provision shall be modified to the minimum extent necessary to make it
+enforceable, and the remaining provisions shall continue in full force.
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Keynetik Solutions
+Nakuru, Kenya
+Email:   support@keynetik.com
+Website: https://www.keynetik.com
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
