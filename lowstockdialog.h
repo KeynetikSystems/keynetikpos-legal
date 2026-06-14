@@ -49,7 +49,7 @@ private:
     void populateLowStockTable(const QVector<InventoryInfo> &items);
     void showRestockDialog(int productId, const QString &productName, int currentQty);
 
-    QString getStatusColor(int quantity) const;
+    QString getStatusColor(int quantity, int reorderLevel) const;
     QString formatDate(const QString &dateStr) const;
 
     // UI Components

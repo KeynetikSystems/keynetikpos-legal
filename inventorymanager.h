@@ -67,7 +67,10 @@ public:
     // Utility
     QString getStatusColor(InventoryStatus status) const;
     QString getStatusText(InventoryStatus status) const;
-    InventoryStatus calculateStatus(int quantity);  // Made public for InventoryDialog
+    // Single source of truth for stock severity. reorderLevel is the per-product
+    // Low threshold (0 disables alerts); Critical is reorderLevel/5 (min 1), so
+    // the default reorderLevel of 20 reproduces the historical 4/20 thresholds.
+    static InventoryStatus calculateStatus(int quantity, int reorderLevel);
 
     // Auto-refresh
     void startAutoRefresh(int intervalMs = 60000);

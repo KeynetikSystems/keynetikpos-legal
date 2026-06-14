@@ -63,9 +63,8 @@ set(PROJECT_SOURCES
     inventorymanager.cpp inventorymanager.h
     inventorydialog.cpp inventorydialog.h
     analyticsdashboard.cpp analyticsdashboard.h
-    analyticsdialog.cpp analyticsdialog.h
-    analyticsmanager.cpp analyticsmanager.h
     receiptprinter.cpp receiptprinter.h
+    smtpclient.cpp smtpclient.h
     saleshistorydialog.cpp saleshistorydialog.h
     colorscheme.cpp colorscheme.h
     user.cpp user.h
@@ -87,8 +86,6 @@ set(PROJECT_SOURCES
     settingsdialog.cpp settingsdialog.h
     zreportdialog.cpp zreportdialog.h
     lowstockdialog.cpp lowstockdialog.h
-    stockmanager.cpp stockmanager.h
-    enhancedanalytics.cpp enhancedanalytics.h
     MessageSchedule.h
     licensemanager.h licensemanager.cpp
     antidebug.h

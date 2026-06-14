@@ -11,6 +11,7 @@
 // =============================================================================
 #include "productgridmodel.h"
 #include "colorscheme.h"
+#include "inventorymanager.h"   // calculateStatus() — single severity rule
 #include "cart.h"          // formatKsh()
 
 #include <QPainter>
@@ -70,6 +71,7 @@ QVariant ProductGridModel::data(const QModelIndex &index, int role) const
     case StockRole:       return p.stockQuantity;
     case BarcodeRole:     return p.barcode;
     case CategoryRole:    return p.category;
+    case ReorderLevelRole: return p.reorderLevel;
     }
     return {};
 }
@@ -153,20 +155,31 @@ void ProductCardDelegate::paint(QPainter *painter,
     const ColorScheme scheme = getColorScheme();
     const int stock = index.data(ProductGridModel::StockRole).toInt();
 
+    // Per-product reorder level drives severity (same rule as the rest of the
+    // app); fall back to the delegate's medium threshold for any model that
+    // doesn't supply the role.
+    const QVariant rlVar = index.data(ProductGridModel::ReorderLevelRole);
+    const int reorder = rlVar.isValid() ? rlVar.toInt() : m_medium;
+
     // Severity is conveyed by a TEXT label as well as colour, so the grid is
     // readable for colour-blind cashiers (and screen readers via the tooltip).
     QColor bg;
     QString severity;
-    if (stock <= 0) {
+    switch (InventoryManager::calculateStatus(stock, reorder)) {
+    case InventoryStatus::OutOfStock:
         bg = QColor(scheme.disabledBg);
-    } else if (stock <= m_critical) {
+        break;
+    case InventoryStatus::Critical:
         bg = QColor(scheme.error);
         severity = QStringLiteral("CRITICAL");
-    } else if (stock <= m_medium) {
+        break;
+    case InventoryStatus::Low:
         bg = QColor(scheme.warning);
         severity = QStringLiteral("LOW");
-    } else {
+        break;
+    case InventoryStatus::Healthy:
         bg = QColor(scheme.accentPrimary);
+        break;
     }
 
     // Pick text colour by background luminance so it always meets contrast —

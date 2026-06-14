@@ -24,6 +24,9 @@
 #include <QDebug>
 #include <QDateTime>
 #include <QDir>
+#include <QFile>
+#include <QFileInfo>
+#include <QSettings>
 #include <QStandardPaths>
 #include <QCoreApplication>
 
@@ -48,7 +51,8 @@ Database::Database()
         dir.mkpath(".");
     }
 
-    db.setDatabaseName(dataPath + "/pos_database.db");
+    m_dbPath = dataPath + "/pos_database.db";
+    db.setDatabaseName(m_dbPath);
 }
 
 Database::~Database()
@@ -161,6 +165,7 @@ bool Database::createTables()
             cost_price REAL NOT NULL DEFAULT 0,
             profit_margin REAL NOT NULL DEFAULT 0,
             stock_quantity INTEGER DEFAULT 0,
+            reorder_level INTEGER NOT NULL DEFAULT 20,
             barcode TEXT UNIQUE,
             is_active INTEGER DEFAULT 1,
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
@@ -278,6 +283,7 @@ bool Database::createTables()
     ensureColumn("sales", "amount_paid", "REAL DEFAULT 0");
     ensureColumn("sales", "change_due", "REAL DEFAULT 0");
     ensureColumn("users", "must_change_password", "INTEGER DEFAULT 0");
+    ensureColumn("products", "reorder_level", "INTEGER NOT NULL DEFAULT 20");
 
     return true;
 }
@@ -417,7 +423,7 @@ QVector<Product> Database::getAllProducts()
 {
     QVector<Product> products;
     QSqlQuery query(db);
-    query.prepare("SELECT id, name, category, price, cost_price, profit_margin, stock_quantity, barcode, is_active FROM products WHERE is_active = 1");
+    query.prepare("SELECT id, name, category, price, cost_price, profit_margin, stock_quantity, reorder_level, barcode, is_active FROM products WHERE is_active = 1");
     query.exec();
     while (query.next()) {
         Product p;
@@ -428,8 +434,9 @@ QVector<Product> Database::getAllProducts()
         p.costPrice = query.value(4).toDouble();
         p.profitMargin = query.value(5).toDouble();
         p.stockQuantity = query.value(6).toInt();
-        p.barcode = query.value(7).toString();
-        p.isActive = query.value(8).toBool();
+        p.reorderLevel = query.value(7).toInt();
+        p.barcode = query.value(8).toString();
+        p.isActive = query.value(9).toBool();
         products.append(p);
     }
     return products;
@@ -439,7 +446,7 @@ QVector<Product> Database::getProductsByCategory(const QString &category)
 {
     QVector<Product> products;
     QSqlQuery query(db);
-    query.prepare("SELECT id, name, category, price, cost_price, profit_margin, stock_quantity, barcode, is_active FROM products WHERE category = ? AND is_active = 1");
+    query.prepare("SELECT id, name, category, price, cost_price, profit_margin, stock_quantity, reorder_level, barcode, is_active FROM products WHERE category = ? AND is_active = 1");
     query.addBindValue(category);
     query.exec();
     while (query.next()) {
@@ -451,8 +458,9 @@ QVector<Product> Database::getProductsByCategory(const QString &category)
         p.costPrice = query.value(4).toDouble();
         p.profitMargin = query.value(5).toDouble();
         p.stockQuantity = query.value(6).toInt();
-        p.barcode = query.value(7).toString();
-        p.isActive = query.value(8).toBool();
+        p.reorderLevel = query.value(7).toInt();
+        p.barcode = query.value(8).toString();
+        p.isActive = query.value(9).toBool();
         products.append(p);
     }
     return products;
@@ -462,7 +470,7 @@ Product Database::getProductById(int id)
 {
     Product p;
     QSqlQuery query(db);
-    query.prepare("SELECT id, name, category, price, cost_price, profit_margin, stock_quantity, barcode, is_active FROM products WHERE id = ?");
+    query.prepare("SELECT id, name, category, price, cost_price, profit_margin, stock_quantity, reorder_level, barcode, is_active FROM products WHERE id = ?");
     query.addBindValue(id);
     query.exec();
     if (query.next()) {
@@ -473,8 +481,9 @@ Product Database::getProductById(int id)
         p.costPrice = query.value(4).toDouble();
         p.profitMargin = query.value(5).toDouble();
         p.stockQuantity = query.value(6).toInt();
-        p.barcode = query.value(7).toString();
-        p.isActive = query.value(8).toBool();
+        p.reorderLevel = query.value(7).toInt();
+        p.barcode = query.value(8).toString();
+        p.isActive = query.value(9).toBool();
     }
     return p;
 }
@@ -483,7 +492,7 @@ Product Database::getProductByBarcode(const QString &barcode)
 {
     Product p;
     QSqlQuery query(db);
-    query.prepare("SELECT id, name, category, price, cost_price, profit_margin, stock_quantity, barcode, is_active FROM products WHERE barcode = ?");
+    query.prepare("SELECT id, name, category, price, cost_price, profit_margin, stock_quantity, reorder_level, barcode, is_active FROM products WHERE barcode = ?");
     query.addBindValue(barcode);
     query.exec();
     if (query.next()) {
@@ -494,8 +503,9 @@ Product Database::getProductByBarcode(const QString &barcode)
         p.costPrice = query.value(4).toDouble();
         p.profitMargin = query.value(5).toDouble();
         p.stockQuantity = query.value(6).toInt();
-        p.barcode = query.value(7).toString();
-        p.isActive = query.value(8).toBool();
+        p.reorderLevel = query.value(7).toInt();
+        p.barcode = query.value(8).toString();
+        p.isActive = query.value(9).toBool();
     }
     return p;
 }
@@ -504,13 +514,14 @@ bool Database::addProduct(const Product &product)
 {
     QSqlQuery query(db);
     double sellingPrice = Product::calculateSellingPrice(product.costPrice, product.profitMargin);
-    query.prepare("INSERT INTO products (name, category, cost_price, profit_margin, price, stock_quantity, barcode) VALUES (?, ?, ?, ?, ?, ?, ?)");
+    query.prepare("INSERT INTO products (name, category, cost_price, profit_margin, price, stock_quantity, reorder_level, barcode) VALUES (?, ?, ?, ?, ?, ?, ?, ?)");
     query.addBindValue(product.name);
     query.addBindValue(product.category);
     query.addBindValue(product.costPrice);
     query.addBindValue(product.profitMargin);
     query.addBindValue(sellingPrice);
     query.addBindValue(product.stockQuantity);
+    query.addBindValue(product.reorderLevel);
     query.addBindValue(product.barcode);
     if (!query.exec()) {
         lastError = query.lastError().text();
@@ -523,13 +534,14 @@ bool Database::updateProduct(const Product &product)
 {
     QSqlQuery query(db);
     double sellingPrice = Product::calculateSellingPrice(product.costPrice, product.profitMargin);
-    query.prepare("UPDATE products SET name = ?, category = ?, cost_price = ?, profit_margin = ?, price = ?, stock_quantity = ?, barcode = ?, is_active = ? WHERE id = ?");
+    query.prepare("UPDATE products SET name = ?, category = ?, cost_price = ?, profit_margin = ?, price = ?, stock_quantity = ?, reorder_level = ?, barcode = ?, is_active = ? WHERE id = ?");
     query.addBindValue(product.name);
     query.addBindValue(product.category);
     query.addBindValue(product.costPrice);
     query.addBindValue(product.profitMargin);
     query.addBindValue(sellingPrice);
     query.addBindValue(product.stockQuantity);
+    query.addBindValue(product.reorderLevel);
     query.addBindValue(product.barcode);
     query.addBindValue(product.isActive);
     query.addBindValue(product.id);
@@ -573,6 +585,19 @@ bool Database::updateStock(int productId, int newQuantity)
     query.addBindValue(newQuantity);
     query.addBindValue(productId);
     return query.exec();
+}
+
+bool Database::setReorderLevel(int productId, int level)
+{
+    QSqlQuery query(db);
+    query.prepare("UPDATE products SET reorder_level = ? WHERE id = ?");
+    query.addBindValue(level);
+    query.addBindValue(productId);
+    if (!query.exec()) {
+        lastError = query.lastError().text();
+        return false;
+    }
+    return true;
 }
 
 bool Database::decreaseStock(int productId, int quantity)
@@ -946,6 +971,80 @@ bool Database::isRefunded(int saleId) const
     if (q.exec() && q.next())
         return q.value(0).toInt() > 0;
     return false;
+}
+
+// ==================== Backup ====================
+
+QString Database::backupDirectory() const
+{
+    return QFileInfo(m_dbPath).absolutePath() + "/backups";
+}
+
+bool Database::backupTo(const QString &destDir, QString *outPath)
+{
+    if (!db.isOpen()) {
+        lastError = "Cannot back up: database is not open";
+        return false;
+    }
+
+    QDir dir(destDir);
+    if (!dir.exists() && !dir.mkpath(".")) {
+        lastError = "Could not create backup directory: " + destDir;
+        return false;
+    }
+
+    // Fold the WAL back into the main DB file so the copy is a complete,
+    // self-contained snapshot (the app is single-threaded, so nothing is
+    // writing concurrently during this call).
+    {
+        QSqlQuery checkpoint(db);
+        checkpoint.exec("PRAGMA wal_checkpoint(TRUNCATE)");
+    }
+
+    const QString stamp = QDateTime::currentDateTime().toString("yyyyMMdd_HHmmss");
+    const QString destPath = QString("%1/pos_database_%2.db").arg(destDir, stamp);
+
+    if (QFile::exists(destPath))
+        QFile::remove(destPath);   // same-second re-run: overwrite
+
+    if (!QFile::copy(m_dbPath, destPath)) {
+        lastError = "Failed to copy database to " + destPath;
+        return false;
+    }
+
+    if (outPath)
+        *outPath = destPath;
+    return true;
+}
+
+void Database::rotateBackups(const QString &destDir, int keep)
+{
+    if (keep < 0) keep = 0;
+
+    QDir dir(destDir);
+    // Names are timestamped (pos_database_YYYYMMDD_HHmmss.db), so a plain name
+    // sort is chronological. Newest last.
+    QStringList files = dir.entryList(QStringList() << "pos_database_*.db",
+                                      QDir::Files, QDir::Name);
+    while (files.size() > keep) {
+        const QString oldest = files.takeFirst();
+        QFile::remove(dir.absoluteFilePath(oldest));
+    }
+}
+
+bool Database::backupIfDue(int keep)
+{
+    QSettings settings("KeynetikPOS", "KeynetikPOS");
+    const QString today = QDate::currentDate().toString("yyyy-MM-dd");
+    if (settings.value("backup/lastDate").toString() == today)
+        return true;   // already backed up today — nothing to do
+
+    if (!backupTo(backupDirectory()))
+        return false;
+
+    rotateBackups(backupDirectory(), keep);
+    settings.setValue("backup/lastDate", today);
+    return true;
 }
 
 QString Database::getLastError() const

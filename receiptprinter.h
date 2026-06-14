@@ -31,9 +31,10 @@
 #include <QStandardPaths>
 #include <QDir>
 #include "CartItem.h"
+#include "smtpclient.h"   // SmtpConfig
 
 struct Receipt {
-    int saleId;
+    int saleId = 0;
     QDateTime dateTime;
     QVector<CartItem> items;
     double subtotal;
@@ -66,6 +67,7 @@ public:
     void setCompanyInfo(const QString &name, const QString &address,
                         const QString &phone, const QString &taxId);
     void setReceiptFooter(const QString &footer);
+    void setSmtpConfig(const SmtpConfig &config);
 
     // Printing
     bool printReceipt(const Receipt &receipt);
@@ -96,6 +98,7 @@ private:
     QString companyPhone;
     QString companyTaxId;
     QString receiptFooter;
+    SmtpConfig smtpConfig;
     Receipt lastReceipt;
     QString lastError;
     QSettings settings;

@@ -78,6 +78,13 @@ void SettingsManager::load()
     m_settings.discountPin          = getSetting("discountPin",   m_settings.discountPin);
     m_settings.requirePinForDiscount= getSetting("requirePinForDiscount", "1") == "1";
 
+    m_settings.smtpHost             = getSetting("smtpHost",      m_settings.smtpHost);
+    m_settings.smtpPort             = getSetting("smtpPort",      QString::number(m_settings.smtpPort)).toInt();
+    m_settings.smtpSecurity         = getSetting("smtpSecurity",  QString::number(m_settings.smtpSecurity)).toInt();
+    m_settings.smtpUsername         = getSetting("smtpUsername",  m_settings.smtpUsername);
+    m_settings.smtpPassword         = getSetting("smtpPassword",  m_settings.smtpPassword);
+    m_settings.smtpFromEmail        = getSetting("smtpFromEmail", m_settings.smtpFromEmail);
+
     // Migrate a legacy plaintext PIN (including the factory default) to a hash
     if (!m_settings.discountPin.isEmpty()
         && !PasswordHasher::isPbkdf2(m_settings.discountPin)) {
@@ -115,6 +122,13 @@ void SettingsManager::save()
     setSetting("printReceipt",          m_settings.printReceipt ? "1" : "0");
     setSetting("discountPin",           m_settings.discountPin);
     setSetting("requirePinForDiscount", m_settings.requirePinForDiscount ? "1" : "0");
+
+    setSetting("smtpHost",              m_settings.smtpHost);
+    setSetting("smtpPort",              QString::number(m_settings.smtpPort));
+    setSetting("smtpSecurity",          QString::number(m_settings.smtpSecurity));
+    setSetting("smtpUsername",          m_settings.smtpUsername);
+    setSetting("smtpPassword",          m_settings.smtpPassword);
+    setSetting("smtpFromEmail",         m_settings.smtpFromEmail);
 
     emit settingsChanged();
 }

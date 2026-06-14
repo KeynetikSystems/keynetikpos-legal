@@ -3,9 +3,8 @@
 // analyticsdashboard.h for the full WHAT/HOW/WHY).
 // -----------------------------------------------------------------------------
 // Implementation notes:
-//  - Runs its own SQL directly against the singleton Database connection (not
-//    through AnalyticsManager); profit/margin comes from the cost_price
-//    snapshots stored in sale_items.
+//  - Runs its own SQL directly against the singleton Database connection;
+//    profit/margin comes from the cost_price snapshots stored in sale_items.
 //  - calculateMetrics()/getTopProducts()/getSlowMovingProducts()/
 //    getHourlySalesData() are bounded by the user-chosen start/end dates;
 //    results render into QTableWidgets, and onExportClicked() writes CSV.

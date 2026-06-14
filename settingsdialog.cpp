@@ -21,6 +21,7 @@
 #include <QTextEdit>
 #include <QCheckBox>
 #include <QDoubleSpinBox>
+#include <QSpinBox>
 #include <QComboBox>
 #include <QLabel>
 #include <QPushButton>
@@ -249,6 +250,44 @@ QWidget *SettingsDialog::buildReceiptTab()
     fLayout->addWidget(new QLabel("<i style='color:#777;'>Appears at the bottom of every receipt.</i>"));
 
     layout->addWidget(footerGroup);
+
+    // ── Email (SMTP) — used by Sales → Email Last Receipt ────────────────────
+    auto *smtpGroup = new QGroupBox("Email Receipts (SMTP)");
+    smtpGroup->setStyleSheet(sectionStyle());
+    auto *smtpForm = new QFormLayout(smtpGroup);
+    smtpForm->setLabelAlignment(Qt::AlignRight | Qt::AlignVCenter);
+
+    m_smtpHost = new QLineEdit(smtpGroup);
+    m_smtpHost->setPlaceholderText("e.g. smtp.gmail.com");
+    smtpForm->addRow("SMTP Host:", m_smtpHost);
+
+    m_smtpPort = new QSpinBox(smtpGroup);
+    m_smtpPort->setRange(1, 65535);
+    m_smtpPort->setValue(587);
+    smtpForm->addRow("Port:", m_smtpPort);
+
+    m_smtpSecurity = new QComboBox(smtpGroup);
+    m_smtpSecurity->addItems({"None", "STARTTLS (587)", "SSL/TLS (465)"});
+    smtpForm->addRow("Security:", m_smtpSecurity);
+
+    m_smtpUser = new QLineEdit(smtpGroup);
+    m_smtpUser->setPlaceholderText("Usually your full email address");
+    smtpForm->addRow("Username:", m_smtpUser);
+
+    m_smtpPassword = new QLineEdit(smtpGroup);
+    m_smtpPassword->setEchoMode(QLineEdit::Password);
+    m_smtpPassword->setPlaceholderText("App password (not your login password)");
+    smtpForm->addRow("Password:", m_smtpPassword);
+
+    m_smtpFrom = new QLineEdit(smtpGroup);
+    m_smtpFrom->setPlaceholderText("From address (defaults to business email)");
+    smtpForm->addRow("From:", m_smtpFrom);
+
+    smtpForm->addRow(new QLabel(
+        "<i style='color:#777;'>Gmail/Outlook need an app password with "
+        "2-factor auth enabled.</i>"));
+
+    layout->addWidget(smtpGroup);
     layout->addStretch();
 
     return w;
@@ -431,6 +470,14 @@ void SettingsDialog::loadCurrentValues()
     m_receiptFooter->setPlainText(s.receiptFooter);
     m_printReceipt->setChecked(s.printReceipt);
 
+    m_smtpHost->setText(s.smtpHost);
+    m_smtpPort->setValue(s.smtpPort);
+    m_smtpSecurity->setCurrentIndex(
+        qBound(0, s.smtpSecurity, m_smtpSecurity->count() - 1));
+    m_smtpUser->setText(s.smtpUsername);
+    m_smtpPassword->setText(s.smtpPassword);
+    m_smtpFrom->setText(s.smtpFromEmail);
+
     m_requirePin->setChecked(s.requirePinForDiscount);
 
     // Load WhatsApp settings
@@ -534,6 +581,13 @@ void SettingsDialog::save()
 
     s.receiptFooter  = m_receiptFooter->toPlainText().trimmed();
     s.printReceipt   = m_printReceipt->isChecked();
+
+    s.smtpHost       = m_smtpHost->text().trimmed();
+    s.smtpPort       = m_smtpPort->value();
+    s.smtpSecurity   = m_smtpSecurity->currentIndex();
+    s.smtpUsername   = m_smtpUser->text().trimmed();
+    s.smtpPassword   = m_smtpPassword->text();
+    s.smtpFromEmail  = m_smtpFrom->text().trimmed();
 
     s.requirePinForDiscount = m_requirePin->isChecked();
 

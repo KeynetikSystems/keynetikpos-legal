@@ -227,13 +227,16 @@ private slots:
     // ── Sales / reports ─────────────────────────────────────────────────────
     void onViewSalesHistory();
     void onReprintReceipt();
+    void onEmailReceipt();
     void onShowAnalytics();
     void onDailyReport();
+    void onShowReports();
 
     // ── Settings ────────────────────────────────────────────────────────────
     void onCompanySettings();
     void onReceiptSettings();
     void onManageSchedules();
+    void onBackupNow();
     void onToggleTheme();
 
     // ── User ────────────────────────────────────────────────────────────────

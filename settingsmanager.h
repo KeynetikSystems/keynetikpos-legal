@@ -49,6 +49,15 @@ struct BusinessSettings {
     // The default "1234" is migrated to a hash on first load.
     QString discountPin      = "1234";
     bool    requirePinForDiscount = true;
+
+    // SMTP (email receipts). smtpSecurity: 0 = None, 1 = STARTTLS, 2 = SSL/TLS.
+    // smtpFromEmail defaults to the business `email` if left blank.
+    QString smtpHost         = "";
+    int     smtpPort         = 587;
+    int     smtpSecurity     = 1;
+    QString smtpUsername     = "";
+    QString smtpPassword     = "";   // app password; stored in the local DB
+    QString smtpFromEmail    = "";
 };
 
 class SettingsManager : public QObject

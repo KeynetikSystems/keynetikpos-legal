@@ -13,6 +13,7 @@
 // =============================================================================
 #include "receiptprinter.h"
 #include "cart.h"          // formatMoney()
+#include "smtpclient.h"
 #include <QFileDialog>
 #include <QTextStream>
 #include <QDebug>
@@ -307,22 +308,30 @@ bool ReceiptPrinter::saveToPDF(const QString &receiptHTML, const QString &filena
     return true;
 }
 
+void ReceiptPrinter::setSmtpConfig(const SmtpConfig &config)
+{
+    smtpConfig = config;
+}
+
 bool ReceiptPrinter::emailReceipt(const Receipt &receipt, const QString &email)
 {
-    QString filename = QString("Receipt_%1.html").arg(receipt.saleId);
-    QString filepath = QStandardPaths::writableLocation(QStandardPaths::DocumentsLocation) + "/" + filename;
-
-    QFile file(filepath);
-    if (!file.open(QIODevice::WriteOnly | QIODevice::Text)) {
-        lastError = "Failed to save receipt HTML";
+    if (!smtpConfig.isConfigured()) {
+        lastError = "Email is not set up. Add your mail server under "
+                    "Settings → Company Information.";
         return false;
     }
 
-    QTextStream out(&file);
-    out << generateReceiptHTML(receipt);
-    file.close();
+    const QString subject = QString("Receipt #%1 from %2")
+                                .arg(receipt.saleId).arg(companyName);
 
-    lastError = "Receipt saved to: " + filepath + "\nManually email to: " + email;
+    SmtpClient client(smtpConfig);
+    QString err;
+    if (!client.send(email, subject, generateReceiptHTML(receipt), &err)) {
+        lastError = "Failed to email receipt: " + err;
+        return false;
+    }
+
+    lastError.clear();
     return true;
 }
 

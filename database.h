@@ -41,6 +41,7 @@ struct Product
     int stockQuantity = 0;
     QString barcode;
     bool isActive = true;
+    int reorderLevel = 20;   // per-product low-stock threshold (0 = no alerts)
 
     static double calculateSellingPrice(double costPrice, double profitMargin)
     {
@@ -106,6 +107,7 @@ public:
 
     // Inventory operations
     bool updateStock(int productId, int newQuantity);
+    bool setReorderLevel(int productId, int level);
     bool decreaseStock(int productId, int quantity);
     bool increaseStock(int productId, int quantity);
     int getStock(int productId);
@@ -138,6 +140,18 @@ public:
     bool processRefund(int saleId, const QString &reason, const QString &processedBy);
     bool isRefunded(int saleId) const;
 
+    // Backup
+    // Checkpoints the WAL and copies the live DB file to destDir as
+    // pos_database_YYYYMMDD_HHmmss.db. On success, *outPath (if given) gets the
+    // backup file path. The default backup directory is <AppData>/backups.
+    QString backupDirectory() const;
+    bool backupTo(const QString &destDir, QString *outPath = nullptr);
+    // Runs at most one backup per calendar day (tracked in QSettings) and prunes
+    // the backup directory to the newest `keep` files. Safe to call every launch.
+    bool backupIfDue(int keep = 10);
+    // Keeps only the newest `keep` pos_database_*.db files in destDir.
+    void rotateBackups(const QString &destDir, int keep);
+
     // Utility
     QString getLastError() const;
     bool executeQuery(const QString &queryStr);
@@ -156,6 +170,7 @@ private:
 
     QSqlDatabase db;
     QString lastError;
+    QString m_dbPath;           // full path to pos_database.db (for backups)
     bool initialized = false;   // guards against repeated initialize() calls
 
     bool createTables();

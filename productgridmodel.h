@@ -40,6 +40,7 @@ public:
         StockRole,
         BarcodeRole,
         CategoryRole,
+        ReorderLevelRole,
     };
 
     explicit ProductGridModel(QObject *parent = nullptr);

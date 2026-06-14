@@ -29,6 +29,7 @@
 #include <QInputDialog>
 #include <QTimer>
 #include <QSysInfo>
+#include <QDebug>
 #include "licensemanager.h"
 #include "antidebug.h"
 
@@ -209,6 +210,11 @@ int main(int argc, char *argv[])
                               QString("Failed to initialize database: %1").arg(db.getLastError()));
         return 1;
     }
+
+    // Automatic safety net: one backup per calendar day, kept to the newest 10.
+    // Best-effort — a failed backup must never block the user from working.
+    if (!db.backupIfDue())
+        qDebug() << "Daily backup skipped:" << db.getLastError();
 
     // ── Login → MainWindow loop ──────────────────────────────────────────
     // Logout emits MainWindow::logoutRequested and closes the window; the

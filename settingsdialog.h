@@ -81,6 +81,14 @@ private:
     QTextEdit   *m_receiptFooter = nullptr;
     QCheckBox   *m_printReceipt  = nullptr;
 
+    // Receipt tab — SMTP (email receipts)
+    QLineEdit   *m_smtpHost      = nullptr;
+    QSpinBox    *m_smtpPort      = nullptr;
+    QComboBox   *m_smtpSecurity  = nullptr;
+    QLineEdit   *m_smtpUser      = nullptr;
+    QLineEdit   *m_smtpPassword  = nullptr;
+    QLineEdit   *m_smtpFrom      = nullptr;
+
     // Security tab
     QLineEdit   *m_discountPin   = nullptr;
     QLineEdit   *m_discountPin2  = nullptr;

@@ -3,9 +3,10 @@
 // inventorymanager.h for the full WHAT/HOW/WHY).
 // -----------------------------------------------------------------------------
 // Implementation notes:
-//  - cachedInventory is filled lazily from Database; getInventoryInfo() falls
-//    back to a DB read with default reorder (20) / optimal (100) levels.
-//  - Status thresholds: Critical <= 4, Low <= 50, else Healthy / OutOfStock.
+//  - cachedInventory is filled lazily from Database; getInventoryInfo() reads
+//    the product's persisted reorder_level (optimal still defaults to 100).
+//  - calculateStatus(qty, reorderLevel) is the single severity rule: OutOfStock
+//    at <=0, Critical at <= reorderLevel/5 (min 1), Low at <= reorderLevel.
 //  - refreshAfterSale() does NOT touch stock — Database::recordSale() already
 //    decremented it inside the checkout transaction; this only re-reads the
 //    quantity, syncs the cache, and emits the level-warning signals.
@@ -43,9 +44,9 @@ InventoryInfo InventoryManager::getInventoryInfo(int productId)
     info.productName = product.name;
     info.category = product.category;
     info.currentQuantity = product.stockQuantity;
-    info.reorderLevel = 20; // Default
+    info.reorderLevel = product.reorderLevel;
     info.optimalLevel = 100; // Default
-    info.status = calculateStatus(product.stockQuantity);
+    info.status = calculateStatus(product.stockQuantity, product.reorderLevel);
     info.lastRestockDate = "";
     info.supplierName = "";
 
@@ -65,7 +66,7 @@ QVector<InventoryInfo> InventoryManager::getLowStockItems()
 
     QVector<Product> products = Database::instance().getAllProducts();
     for (const Product &p : products) {
-        if (p.stockQuantity > 4 && p.stockQuantity <= 50) {
+        if (calculateStatus(p.stockQuantity, p.reorderLevel) == InventoryStatus::Low) {
             InventoryInfo info = getInventoryInfo(p.id);
             lowItems.append(info);
         }
@@ -80,7 +81,7 @@ QVector<InventoryInfo> InventoryManager::getCriticalStockItems()
 
     QVector<Product> products = Database::instance().getAllProducts();
     for (const Product &p : products) {
-        if (p.stockQuantity <= 4) {
+        if (calculateStatus(p.stockQuantity, p.reorderLevel) == InventoryStatus::Critical) {
             InventoryInfo info = getInventoryInfo(p.id);
             criticalItems.append(info);
         }
@@ -104,18 +105,24 @@ void InventoryManager::refreshAfterSale(int productId)
     info.productName = product.name;
     info.category = product.category;
     info.currentQuantity = newQty;
-    if (info.reorderLevel <= 0) info.reorderLevel = 20;
+    info.reorderLevel = product.reorderLevel;
     if (info.optimalLevel <= 0) info.optimalLevel = 100;
-    info.status = calculateStatus(newQty);
+    info.status = calculateStatus(newQty, info.reorderLevel);
 
     emit inventoryUpdated(productId, newQty);
 
-    if (newQty == 0) {
+    switch (info.status) {
+    case InventoryStatus::OutOfStock:
         emit inventoryOutOfStock(productId, product.name);
-    } else if (newQty <= 4) {
+        break;
+    case InventoryStatus::Critical:
         emit inventoryCritical(productId, product.name, newQty);
-    } else if (newQty <= 20) {
+        break;
+    case InventoryStatus::Low:
         emit inventoryLow(productId, product.name, newQty);
+        break;
+    case InventoryStatus::Healthy:
+        break;
     }
 }
 
@@ -138,7 +145,9 @@ bool InventoryManager::restockProduct(int productId, int quantity, const QString
         cachedInventory[productId].currentQuantity = product.stockQuantity;
         cachedInventory[productId].lastRestockDate = QDateTime::currentDateTime().toString("yyyy-MM-dd");
         cachedInventory[productId].supplierName = supplierName;
-        cachedInventory[productId].status = calculateStatus(product.stockQuantity);
+        cachedInventory[productId].reorderLevel = product.reorderLevel;
+        cachedInventory[productId].status =
+            calculateStatus(product.stockQuantity, product.reorderLevel);
     } else {
         getInventoryInfo(productId);
     }
@@ -149,11 +158,16 @@ bool InventoryManager::restockProduct(int productId, int quantity, const QString
 
 bool InventoryManager::setReorderLevel(int productId, int level)
 {
+    if (level < 0) level = 0;
+    if (!Database::instance().setReorderLevel(productId, level))
+        return false;
+
     if (cachedInventory.contains(productId)) {
-        cachedInventory[productId].reorderLevel = level;
-        return true;
+        InventoryInfo &info = cachedInventory[productId];
+        info.reorderLevel = level;
+        info.status = calculateStatus(info.currentQuantity, level);
     }
-    return false;
+    return true;
 }
 
 QString InventoryManager::getStatusColor(InventoryStatus status) const
@@ -215,11 +229,13 @@ void InventoryManager::checkAllInventoryLevels()
     }
 }
 
-InventoryStatus InventoryManager::calculateStatus(int quantity)
+InventoryStatus InventoryManager::calculateStatus(int quantity, int reorderLevel)
 {
-    if (quantity == 0) return InventoryStatus::OutOfStock;
-    if (quantity <= 4) return InventoryStatus::Critical;
-    if (quantity <= 20) return InventoryStatus::Low;
+    if (quantity <= 0) return InventoryStatus::OutOfStock;
+    if (reorderLevel <= 0) return InventoryStatus::Healthy;  // alerts disabled
+    const int critical = qMax(1, reorderLevel / 5);
+    if (quantity <= critical)     return InventoryStatus::Critical;
+    if (quantity <= reorderLevel) return InventoryStatus::Low;
     return InventoryStatus::Healthy;
 }
 
@@ -234,9 +250,9 @@ void InventoryManager::loadInventoryCache()
         info.productName = p.name;
         info.category = p.category;
         info.currentQuantity = p.stockQuantity;
-        info.reorderLevel = 20;
+        info.reorderLevel = p.reorderLevel;
         info.optimalLevel = 100;
-        info.status = calculateStatus(p.stockQuantity);
+        info.status = calculateStatus(p.stockQuantity, p.reorderLevel);
         info.lastRestockDate = "";
         info.supplierName = "";
 

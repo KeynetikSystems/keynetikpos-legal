@@ -183,7 +183,7 @@ void LowStockDialog::populateCriticalTable(const QVector<InventoryInfo> &items)
         // Current Quantity
         QTableWidgetItem *qtyItem = new QTableWidgetItem(QString::number(item.currentQuantity));
         qtyItem->setTextAlignment(Qt::AlignCenter);
-        qtyItem->setBackground(QBrush(QColor(getStatusColor(item.currentQuantity))));
+        qtyItem->setBackground(QBrush(QColor(getStatusColor(item.currentQuantity, item.reorderLevel))));
         qtyItem->setForeground(QBrush(Qt::white));
         QFont boldFont = qtyItem->font();
         boldFont.setBold(true);
@@ -235,7 +235,7 @@ void LowStockDialog::populateLowStockTable(const QVector<InventoryInfo> &items)
         // Current Quantity
         QTableWidgetItem *qtyItem = new QTableWidgetItem(QString::number(item.currentQuantity));
         qtyItem->setTextAlignment(Qt::AlignCenter);
-        qtyItem->setBackground(QBrush(QColor(getStatusColor(item.currentQuantity))));
+        qtyItem->setBackground(QBrush(QColor(getStatusColor(item.currentQuantity, item.reorderLevel))));
         qtyItem->setForeground(QBrush(Qt::white));
         QFont boldFont = qtyItem->font();
         boldFont.setBold(true);
@@ -362,13 +362,16 @@ void LowStockDialog::showRestockDialog(int productId, const QString &productName
     }
 }
 
-QString LowStockDialog::getStatusColor(int quantity) const
+QString LowStockDialog::getStatusColor(int quantity, int reorderLevel) const
 {
     const ColorScheme scheme = getColorScheme();
-    if (quantity == 0) return scheme.textSecondary;   // Gray - Out of stock
-    if (quantity <= 4) return scheme.error;           // Red - Critical
-    if (quantity <= 20) return scheme.warning;        // Orange - Low
-    return scheme.accentPrimary;                      // Green - Healthy
+    switch (InventoryManager::calculateStatus(quantity, reorderLevel)) {
+    case InventoryStatus::OutOfStock: return scheme.textSecondary;  // Gray
+    case InventoryStatus::Critical:   return scheme.error;          // Red
+    case InventoryStatus::Low:        return scheme.warning;        // Orange
+    case InventoryStatus::Healthy:    return scheme.accentPrimary;  // Green
+    }
+    return scheme.accentPrimary;
 }
 
 QString LowStockDialog::formatDate(const QString &dateStr) const

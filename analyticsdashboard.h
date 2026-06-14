@@ -5,13 +5,13 @@
 //       end pickers, metric cards (sales, profit, margin, tax collected,
 //       discounts given, transactions, items), and tabs for top products,
 //       slow movers, and an hourly-sales table, with CSV export.
-// HOW:  Runs its own SQL directly against the singleton Database connection
-//       (not through AnalyticsManager), including profit math from the
-//       sale_items.cost_price snapshots, and renders into QTableWidgets.
+// HOW:  Runs its own SQL directly against the singleton Database connection,
+//       including profit math from the sale_items.cost_price snapshots, and
+//       renders into QTableWidgets.
 // WHY:  Its distinguishing features are arbitrary date ranges and a profit/
 //       margin focus — it answers "how did the business do between these two
-//       dates" where AnalyticsDialog answers "how are we trending lately".
-//       (Overlap with the other analytics UIs is acknowledged tech debt.)
+//       dates". It is the single on-screen analytics view; printable,
+//       exportable accountant reports live in ReportsDialog.
 // =============================================================================
 #ifndef ANALYTICSDASHBOARD_H
 #define ANALYTICSDASHBOARD_H

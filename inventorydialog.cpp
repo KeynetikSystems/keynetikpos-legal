@@ -284,10 +284,11 @@ void InventoryDialog::setupStockManagementTab()
     stockLayout->addWidget(instructionsLabel);
 
     stockManagementTable = new QTableWidget();
-    stockManagementTable->setColumnCount(9);
+    stockManagementTable->setColumnCount(10);
     stockManagementTable->setHorizontalHeaderLabels({
                                                      "ID", "Product Name", "Category", "Barcode",
-                                                     "Cost Price", "Profit %", "Selling Price", "Stock Qty", "Status"});
+                                                     "Cost Price", "Profit %", "Selling Price", "Stock Qty",
+                                                     "Reorder Level", "Status"});
     stockManagementTable->setSelectionBehavior(QAbstractItemView::SelectRows);
     stockManagementTable->setSelectionMode(QAbstractItemView::SingleSelection);
     stockManagementTable->setAlternatingRowColors(true);
@@ -842,6 +843,13 @@ void InventoryDialog::updateStockManagementTable()
         stockItem->setTextAlignment(Qt::AlignCenter);
         stockManagementTable->setItem(row, 7, stockItem);
 
+        QTableWidgetItem *reorderItem = new QTableWidgetItem(
+            QString::number(info.reorderLevel));
+        reorderItem->setTextAlignment(Qt::AlignCenter);
+        reorderItem->setToolTip("Stock at or below this triggers a Low alert "
+                                "(0 = no alerts).");
+        stockManagementTable->setItem(row, 8, reorderItem);
+
         QString statusText = getStatusIcon(info.status) + " " +
                              inventoryManager->getStatusText(info.status);
         QTableWidgetItem *statusItem = new QTableWidgetItem(statusText);
@@ -850,7 +858,7 @@ void InventoryDialog::updateStockManagementTable()
         statusItem->setForeground(
             QBrush(QColor(inventoryManager->getStatusColor(info.status))));
         statusItem->setFont(QFont(statusItem->font().family(), -1, QFont::Bold));
-        stockManagementTable->setItem(row, 8, statusItem);
+        stockManagementTable->setItem(row, 9, statusItem);
     }
 
     stockManagementTable->resizeColumnsToContents();
@@ -914,22 +922,27 @@ void InventoryDialog::onStockTableCellChanged(int row, int column)
         }
     }
 
-    if (column == 7) {
-        bool ok;
-        int qty = stockManagementTable->item(row, 7)->text().toInt(&ok);
-        if (ok && qty >= 0) {
-            InventoryStatus status = inventoryManager->calculateStatus(qty);
-            if (auto *si = stockManagementTable->item(row, 8)) {
-                si->setText(getStatusIcon(status) + " " +
-                            inventoryManager->getStatusText(status));
-                si->setForeground(
-                    QBrush(QColor(inventoryManager->getStatusColor(status))));
+    if (column == 7 || column == 8) {
+        bool qtyOk, reorderOk;
+        int qty     = stockManagementTable->item(row, 7)->text().toInt(&qtyOk);
+        int reorder = stockManagementTable->item(row, 8)->text().toInt(&reorderOk);
+        QTableWidgetItem *edited = stockManagementTable->item(row, column);
+        const bool valid = (column == 7) ? (qtyOk && qty >= 0)
+                                         : (reorderOk && reorder >= 0);
+        if (valid) {
+            if (qtyOk && reorderOk) {
+                InventoryStatus status =
+                    InventoryManager::calculateStatus(qty, reorder);
+                if (auto *si = stockManagementTable->item(row, 9)) {
+                    si->setText(getStatusIcon(status) + " " +
+                                inventoryManager->getStatusText(status));
+                    si->setForeground(
+                        QBrush(QColor(inventoryManager->getStatusColor(status))));
+                }
             }
-            stockManagementTable->item(row, 7)
-                ->setBackground(QBrush(QColor(scheme.inputBg)));
+            edited->setBackground(QBrush(QColor(scheme.inputBg)));
         } else {
-            stockManagementTable->item(row, 7)
-            ->setBackground(QBrush(QColor(scheme.errorBg)));
+            edited->setBackground(QBrush(QColor(scheme.errorBg)));
         }
     }
 }
@@ -981,12 +994,18 @@ void InventoryDialog::onAddNewItemClicked()
     stockItem->setTextAlignment(Qt::AlignCenter);
     stockManagementTable->setItem(row, 7, stockItem);
 
+    QTableWidgetItem *reorderItem = hl("20");
+    reorderItem->setTextAlignment(Qt::AlignCenter);
+    reorderItem->setToolTip("Stock at or below this triggers a Low alert "
+                            "(0 = no alerts).");
+    stockManagementTable->setItem(row, 8, reorderItem);
+
     QTableWidgetItem *statusItem = new QTableWidgetItem("✗ Out of Stock");
     statusItem->setFlags(statusItem->flags() & ~Qt::ItemIsEditable);
     statusItem->setTextAlignment(Qt::AlignCenter);
     statusItem->setForeground(QBrush(QColor(scheme.textSecondary)));
     statusItem->setFont(QFont(statusItem->font().family(), -1, QFont::Bold));
-    stockManagementTable->setItem(row, 8, statusItem);
+    stockManagementTable->setItem(row, 9, statusItem);
 
     connect(stockManagementTable, &QTableWidget::cellChanged,
             this, &InventoryDialog::onStockTableCellChanged);
@@ -1062,10 +1081,11 @@ void InventoryDialog::onSaveChangesClicked()
         QString category     = stockManagementTable->item(row, 2)->text().trimmed();
         QString barcode      = stockManagementTable->item(row, 3)->text().trimmed();
 
-        bool   costOk, marginOk, qtyOk;
+        bool   costOk, marginOk, qtyOk, reorderOk;
         double costPrice    = stockManagementTable->item(row, 4)->text().toDouble(&costOk);
         double profitMargin = stockManagementTable->item(row, 5)->text().toDouble(&marginOk);
         int    qty          = stockManagementTable->item(row, 7)->text().toInt(&qtyOk);
+        int    reorderLevel = stockManagementTable->item(row, 8)->text().toInt(&reorderOk);
 
         auto fail = [&](const QString &msg) {
             errorMessages.append(msg);
@@ -1077,6 +1097,7 @@ void InventoryDialog::onSaveChangesClicked()
         if (!costOk   || costPrice    < 0) { fail(QString("Row %1: Invalid cost price").arg(row+1));   continue; }
         if (!marginOk || profitMargin < 0) { fail(QString("Row %1: Invalid profit margin").arg(row+1));continue; }
         if (!qtyOk    || qty          < 0) { fail(QString("Row %1: Invalid quantity").arg(row+1));     continue; }
+        if (!reorderOk || reorderLevel < 0){ fail(QString("Row %1: Invalid reorder level").arg(row+1));continue; }
 
         Product product;
         product.id            = productId;
@@ -1087,6 +1108,7 @@ void InventoryDialog::onSaveChangesClicked()
         product.profitMargin  = profitMargin;
         product.price         = Product::calculateSellingPrice(costPrice, profitMargin);
         product.stockQuantity = qty;
+        product.reorderLevel  = reorderLevel;
         product.isActive      = true;
 
         bool success = (productId > 0)
@@ -1134,8 +1156,8 @@ void InventoryDialog::onSaveChangesClicked()
 void InventoryDialog::highlightRowError(int row)
 {
     const ColorScheme scheme = getColorScheme();
-    for (int col = 1; col <= 7; ++col) {
-        if (col == 6) continue;
+    for (int col = 1; col <= 8; ++col) {
+        if (col == 6) continue;   // selling price is read-only/derived
         if (auto *item = stockManagementTable->item(row, col))
             item->setBackground(QBrush(QColor(scheme.errorBg)));
     }
@@ -1144,8 +1166,8 @@ void InventoryDialog::highlightRowError(int row)
 void InventoryDialog::clearRowHighlight(int row)
 {
     const ColorScheme scheme = getColorScheme();
-    for (int col = 1; col <= 7; ++col) {
-        if (col == 6) continue;
+    for (int col = 1; col <= 8; ++col) {
+        if (col == 6) continue;   // selling price is read-only/derived
         if (auto *item = stockManagementTable->item(row, col))
             item->setBackground(QBrush(QColor(scheme.inputBg)));
     }

@@ -25,6 +25,8 @@
 #include "paymentdialog.h"
 #include "discountdialog.h"
 #include "analyticsdashboard.h"
+#include "reportsdialog.h"
+#include "smtpclient.h"
 #include "inventorymanager.h"
 #include "receiptprinter.h"
 #include "inventorydialog.h"
@@ -89,6 +91,20 @@ constexpr int DATETIME_UPDATE_MS    = 1000;
 // (roundCents/formatMoney live in cart.h; CartTotals/computeCartTotals in
 //  checkoutservice.h)
 // -----------------------------------------------------------------------------
+static SmtpConfig makeSmtpConfig(const BusinessSettings &bs)
+{
+    SmtpConfig cfg;
+    cfg.host      = bs.smtpHost;
+    cfg.port      = bs.smtpPort;
+    cfg.security  = static_cast<SmtpConfig::Security>(bs.smtpSecurity);
+    cfg.username  = bs.smtpUsername;
+    cfg.password  = bs.smtpPassword;
+    // Fall back to the business email as the From address if none is given.
+    cfg.fromEmail = bs.smtpFromEmail.isEmpty() ? bs.email : bs.smtpFromEmail;
+    cfg.fromName  = bs.businessName;
+    return cfg;
+}
+
 static inline bool checkPermission(QWidget *parent, Permission perm,
                                    const QString &featureName)
 {
@@ -190,6 +206,7 @@ MainWindow::MainWindow(QWidget *parent)
     const BusinessSettings &bs = settingsManager->settings();
     receiptPrinter->setCompanyInfo(bs.businessName, bs.address, bs.phone, "");
     receiptPrinter->setReceiptFooter(bs.receiptFooter);
+    receiptPrinter->setSmtpConfig(makeSmtpConfig(bs));
 
     // Keep totals + tax label + currency in sync when settings change
     connect(settingsManager, &SettingsManager::settingsChanged, this, [this]() {
@@ -439,6 +456,8 @@ void MainWindow::setupMenuBar()
             &QAction::triggered, this, &MainWindow::onViewSalesHistory);
     connect(salesMenu->addAction("🖨 Reprint Last Receipt"),
             &QAction::triggered, this, &MainWindow::onReprintReceipt);
+    connect(salesMenu->addAction("✉ Email Last Receipt"),
+            &QAction::triggered, this, &MainWindow::onEmailReceipt);
 
     // Inventory
     QMenu *inventoryMenu = mb->addMenu("&Inventory");
@@ -459,6 +478,8 @@ void MainWindow::setupMenuBar()
     reportsButton = reportsMenu->addAction("📋 Daily Report");
     connect(reportsButton, &QAction::triggered,
             this, &MainWindow::onDailyReport);
+    connect(reportsMenu->addAction("📄 Detailed Reports"),
+            &QAction::triggered, this, &MainWindow::onShowReports);
 
     // Settings
     QMenu *settingsMenu = mb->addMenu("&Settings");
@@ -468,6 +489,8 @@ void MainWindow::setupMenuBar()
             &QAction::triggered, this, &MainWindow::onManageSchedules);
     connect(settingsMenu->addAction("🧾 Receipt Settings"),
             &QAction::triggered, this, &MainWindow::onReceiptSettings);
+    connect(settingsMenu->addAction("💾 Backup Now"),
+            &QAction::triggered, this, &MainWindow::onBackupNow);
     settingsMenu->addSeparator();
     themeAction = settingsMenu->addAction("🌙 Toggle Dark Mode");
     connect(themeAction, &QAction::triggered, this, &MainWindow::onToggleTheme);
@@ -1332,6 +1355,16 @@ void MainWindow::onShowAnalytics()
                                           "Opened analytics dashboard");
 }
 
+void MainWindow::onShowReports()
+{
+    if (!checkPermission(this, Permission::VIEW_REPORTS, "view reports"))
+        return;
+    ReportsDialog dialog(this);
+    dialog.exec();
+    UserManager::instance().logUserAction("Viewed Reports",
+                                          "Opened detailed reports dialog");
+}
+
 void MainWindow::onViewSalesHistory()
 {
     if (!checkPermission(this, Permission::VIEW_SALES, "view sales history"))
@@ -1360,6 +1393,45 @@ void MainWindow::onReprintReceipt()
                                               "Reprinted last receipt");
     } else {
         QMessageBox::warning(this, "Reprint Failed",
+                             receiptPrinter->getLastError());
+    }
+}
+
+void MainWindow::onEmailReceipt()
+{
+    Receipt receipt = receiptPrinter->getLastReceipt();
+    if (receipt.saleId == 0) {
+        QMessageBox::information(this, "No Receipt",
+                                 "There is no recent receipt to email.");
+        return;
+    }
+
+    bool ok = false;
+    const QString email = QInputDialog::getText(
+        this, "Email Receipt",
+        QString("Send receipt #%1 to:").arg(receipt.saleId),
+        QLineEdit::Normal, settingsManager->settings().email, &ok).trimmed();
+    if (!ok || email.isEmpty())
+        return;
+    if (!email.contains('@')) {
+        QMessageBox::warning(this, "Invalid Email",
+                             "Please enter a valid email address.");
+        return;
+    }
+
+    QApplication::setOverrideCursor(Qt::WaitCursor);
+    const bool sent = receiptPrinter->emailReceipt(receipt, email);
+    QApplication::restoreOverrideCursor();
+
+    if (sent) {
+        statusLabel->setText("Receipt emailed to " + email);
+        UserManager::instance().logUserAction(
+            "Email Receipt",
+            QString("Emailed receipt #%1 to %2").arg(receipt.saleId).arg(email));
+        QMessageBox::information(this, "Receipt Sent",
+                                 "The receipt was emailed to " + email + ".");
+    } else {
+        QMessageBox::warning(this, "Email Failed",
                              receiptPrinter->getLastError());
     }
 }
@@ -1446,6 +1518,7 @@ void MainWindow::onCompanySettings()
         receiptPrinter->setCompanyInfo(
             bs.businessName, bs.address, bs.phone, "");
         receiptPrinter->setReceiptFooter(bs.receiptFooter);
+        receiptPrinter->setSmtpConfig(makeSmtpConfig(bs));
         reloadMessagingProviders(scheduleManager, this);
         statusLabel->setText("Settings saved.");
         UserManager::instance().logUserAction("Updated Settings",
@@ -1463,10 +1536,29 @@ void MainWindow::onReceiptSettings()
         receiptPrinter->setCompanyInfo(
             bs.businessName, bs.address, bs.phone, "");
         receiptPrinter->setReceiptFooter(bs.receiptFooter);
+        receiptPrinter->setSmtpConfig(makeSmtpConfig(bs));
         reloadMessagingProviders(scheduleManager, this);
         statusLabel->setText("Receipt settings saved.");
         UserManager::instance().logUserAction("Updated Settings",
                                               "Receipt settings changed");
+    }
+}
+
+void MainWindow::onBackupNow()
+{
+    if (!checkPermission(this, Permission::BACKUP_RESTORE, "back up the database"))
+        return;
+
+    QString path;
+    if (Database::instance().backupTo(Database::instance().backupDirectory(), &path)) {
+        Database::instance().rotateBackups(Database::instance().backupDirectory(), 10);
+        statusLabel->setText("Backup created.");
+        UserManager::instance().logUserAction("Backup", "Created manual backup: " + path);
+        QMessageBox::information(this, "Backup Complete",
+                                 QString("Database backed up to:\n%1").arg(path));
+    } else {
+        QMessageBox::warning(this, "Backup Failed",
+                             Database::instance().getLastError());
     }
 }
 
