@@ -31,6 +31,7 @@
 #include <QTimer>
 #include <QUndoStack>
 #include <QMap>
+#include "money.h"
 #include "inventorymanager.h"
 
 // Forward declarations
@@ -126,7 +127,7 @@ private:
     // UI helper methods
     QWidget* createSummaryCard(const QString &title, QLabel **valueLabel, const QString &color);
     void showNotification(const QString &message, NotificationType type);
-    QString formatCurrency(double amount);
+    QString formatCurrency(Money amount);
     QString formatQuantity(int quantity);
     QString generateTempBarcode();
 

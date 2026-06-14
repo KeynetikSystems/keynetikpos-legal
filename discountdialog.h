@@ -21,15 +21,17 @@
 #include <QPushButton>
 #include <QButtonGroup>
 
+#include "money.h"
+
 class DiscountDialog : public QDialog
 {
     Q_OBJECT
 
 public:
-    explicit DiscountDialog(double subtotal, QWidget *parent = nullptr);
+    explicit DiscountDialog(Money subtotal, QWidget *parent = nullptr);
     ~DiscountDialog();
 
-    double getDiscountAmount() const;
+    Money getDiscountAmount() const;
     QString getDiscountReason() const;
 
 private slots:

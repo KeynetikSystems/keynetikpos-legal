@@ -33,7 +33,7 @@
 // ─────────────────────────────────────────────────────────────────────────────
 namespace {
 
-// roundCents() / formatMoney() come from cart.h (single source of truth).
+// Money / formatMoney() come from money.h (single source of truth).
 
 } // anonymous namespace
 
@@ -158,13 +158,13 @@ void AnalyticsDashboard::setupMetricsSection()
 
     // Row 0
     QGroupBox *salesCard = new QGroupBox("Total Sales");
-    totalSalesLabel = makeMetricLabel(formatMoney(0), "statValueLg", "success");
+    totalSalesLabel = makeMetricLabel(formatMoney(Money()), "statValueLg", "success");
     (new QVBoxLayout(salesCard))->addWidget(totalSalesLabel);
     metricsLayout->addWidget(salesCard, 0, 0);
 
     QGroupBox *profitCard = new QGroupBox("Gross Profit");
     QVBoxLayout *pl = new QVBoxLayout(profitCard);
-    profitLabel = makeMetricLabel(formatMoney(0), "statValueLg", "success");
+    profitLabel = makeMetricLabel(formatMoney(Money()), "statValueLg", "success");
     pl->addWidget(profitLabel);
     profitMarginLabel = new QLabel("Margin: 0%");
     profitMarginLabel->setProperty("kind", "secondary");
@@ -178,18 +178,18 @@ void AnalyticsDashboard::setupMetricsSection()
     metricsLayout->addWidget(transCard, 0, 2);
 
     QGroupBox *avgCard = new QGroupBox("Avg Transaction");
-    avgTransactionLabel = makeMetricLabel(formatMoney(0), "statValueLg", "tertiary");
+    avgTransactionLabel = makeMetricLabel(formatMoney(Money()), "statValueLg", "tertiary");
     (new QVBoxLayout(avgCard))->addWidget(avgTransactionLabel);
     metricsLayout->addWidget(avgCard, 0, 3);
 
     // Row 1
     QGroupBox *taxCard = new QGroupBox("Tax Collected");
-    taxCollectedLabel = makeMetricLabel(formatMoney(0), "statValue", "secondary");
+    taxCollectedLabel = makeMetricLabel(formatMoney(Money()), "statValue", "secondary");
     (new QVBoxLayout(taxCard))->addWidget(taxCollectedLabel);
     metricsLayout->addWidget(taxCard, 1, 0);
 
     QGroupBox *discountCard = new QGroupBox("Discounts Given");
-    discountsLabel = makeMetricLabel(formatMoney(0), "statValue", "secondary");
+    discountsLabel = makeMetricLabel(formatMoney(Money()), "statValue", "secondary");
     (new QVBoxLayout(discountCard))->addWidget(discountsLabel);
     metricsLayout->addWidget(discountCard, 1, 1);
 
@@ -276,7 +276,7 @@ void AnalyticsDashboard::setupHourlySalesSection()
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Data — roundCents() applied at every DB read site
+// Data — money columns are integer cents; read via Money::fromCents()
 // ─────────────────────────────────────────────────────────────────────────────
 
 void AnalyticsDashboard::loadData()
@@ -300,13 +300,13 @@ SalesMetrics AnalyticsDashboard::calculateMetrics()
     query.addBindValue(endDate.toString(Qt::ISODate));
 
     if (query.exec() && query.next()) {
-        metrics.totalSales     = roundCents(query.value("total_sales").toDouble());
-        metrics.taxCollected   = roundCents(query.value("total_tax").toDouble());
-        metrics.discountsGiven = roundCents(query.value("total_discount").toDouble());
+        metrics.totalSales     = Money::fromCents(query.value("total_sales").toLongLong());
+        metrics.taxCollected   = Money::fromCents(query.value("total_tax").toLongLong());
+        metrics.discountsGiven = Money::fromCents(query.value("total_discount").toLongLong());
         metrics.transactionCount = query.value("transaction_count").toInt();
         if (metrics.transactionCount > 0)
             metrics.averageTransaction =
-                roundCents(metrics.totalSales / metrics.transactionCount);
+                Money::fromCents(metrics.totalSales.cents() / metrics.transactionCount);
     }
 
     query.prepare(
@@ -318,10 +318,10 @@ SalesMetrics AnalyticsDashboard::calculateMetrics()
     if (query.exec() && query.next())
         metrics.itemsSold = query.value("total_items").toInt();
 
-    metrics.totalProfit = roundCents(
+    metrics.totalProfit =
         Database::instance().getActualGrossProfit(
             startDate.toString("yyyy-MM-dd"),
-            endDate.toString("yyyy-MM-dd")));
+            endDate.toString("yyyy-MM-dd"));
 
     return metrics;
 }
@@ -349,8 +349,8 @@ QVector<ProductPerformance> AnalyticsDashboard::getTopProducts(int limit)
             p.productName  = query.value("product_name").toString();
             p.category     = query.value("category").toString();
             p.unitsSold    = query.value("units_sold").toInt();
-            p.revenue      = roundCents(query.value("revenue").toDouble());
-            p.profit       = roundCents(query.value("actual_profit").toDouble());
+            p.revenue      = Money::fromCents(query.value("revenue").toLongLong());
+            p.profit       = Money::fromCents(query.value("actual_profit").toLongLong());
             p.timesOrdered = query.value("times_ordered").toInt();
             products.append(p);
         }
@@ -380,7 +380,7 @@ QVector<ProductPerformance> AnalyticsDashboard::getSlowMovingProducts(int limit)
             p.productName = query.value("product_name").toString();
             p.category    = query.value("category").toString();
             p.unitsSold   = query.value("units_sold").toInt();
-            p.revenue     = roundCents(query.value("revenue").toDouble());
+            p.revenue     = Money::fromCents(query.value("revenue").toLongLong());
             products.append(p);
         }
     }
@@ -406,7 +406,7 @@ QVector<HourlySales> AnalyticsDashboard::getHourlySalesData()
             int h = query.value("hour").toInt();
             if (h >= 0 && h < 24) {
                 hourlyData[h].transactions = query.value("transaction_count").toInt();
-                hourlyData[h].sales = roundCents(query.value("total_sales").toDouble());
+                hourlyData[h].sales = Money::fromCents(query.value("total_sales").toLongLong());
             }
         }
     }
@@ -427,9 +427,9 @@ void AnalyticsDashboard::updateMetricsDisplay(const SalesMetrics &metrics)
     discountsLabel->setText(formatCurrency(metrics.discountsGiven));
     itemsSoldLabel->setText(QString::number(metrics.itemsSold));
 
-    double margin = (metrics.totalSales > 0.0)
-                        ? roundCents((metrics.totalProfit / metrics.totalSales) * 100.0)
-                        : 0.0;
+    const double margin = (metrics.totalSales.cents() > 0)
+        ? (static_cast<double>(metrics.totalProfit.cents()) / metrics.totalSales.cents()) * 100.0
+        : 0.0;
     profitMarginLabel->setText(QString("Margin: %1%").arg(margin, 0, 'f', 1));
 }
 
@@ -509,9 +509,8 @@ void AnalyticsDashboard::updateHourlyChart(const QVector<HourlySales> &data)
     hourlySalesTable->setSortingEnabled(false);
     hourlySalesTable->setRowCount(24);
 
-    double totalSales = 0.0;
+    Money totalSales;
     for (const HourlySales &d : data) totalSales += d.sales;
-    totalSales = roundCents(totalSales);
 
     for (int i = 0; i < data.size(); ++i) {
         const HourlySales &d = data[i];
@@ -530,14 +529,14 @@ void AnalyticsDashboard::updateHourlyChart(const QVector<HourlySales> &data)
         hourlySalesTable->setItem(i, 2, si);
 
         // Round to 1 dp to avoid 99.9999% style artefacts
-        double pct = (totalSales > 0.0)
-                         ? std::round((d.sales / totalSales) * 1000.0) / 10.0
+        double pct = (totalSales.cents() > 0)
+                         ? std::round((static_cast<double>(d.sales.cents()) / totalSales.cents()) * 1000.0) / 10.0
                          : 0.0;
         QTableWidgetItem *pi = new QTableWidgetItem(formatPercentage(pct));
         pi->setTextAlignment(Qt::AlignCenter);
         hourlySalesTable->setItem(i, 3, pi);
 
-        if (d.sales > 0.0 && pct > 10.0) {
+        if (d.sales.cents() > 0 && pct > 10.0) {
             for (int col = 0; col < 4; ++col)
                 if (auto *item = hourlySalesTable->item(i, col)) {
                     item->setBackground(QBrush(QColor(scheme.warningBg)));
@@ -594,20 +593,20 @@ void AnalyticsDashboard::onExportClicked()
 
     SalesMetrics m = calculateMetrics();
     out << "KEY METRICS\n"
-        << "Total Sales,"         << m.totalSales         << "\n"
-        << "Gross Profit,"        << m.totalProfit        << "\n"
-        << "Transactions,"        << m.transactionCount   << "\n"
-        << "Average Transaction," << m.averageTransaction << "\n"
-        << "Tax Collected,"       << m.taxCollected       << "\n"
-        << "Discounts Given,"     << m.discountsGiven     << "\n"
-        << "Items Sold,"          << m.itemsSold          << "\n\n";
+        << "Total Sales,"         << m.totalSales.toMajor()         << "\n"
+        << "Gross Profit,"        << m.totalProfit.toMajor()        << "\n"
+        << "Transactions,"        << m.transactionCount             << "\n"
+        << "Average Transaction," << m.averageTransaction.toMajor() << "\n"
+        << "Tax Collected,"       << m.taxCollected.toMajor()       << "\n"
+        << "Discounts Given,"     << m.discountsGiven.toMajor()     << "\n"
+        << "Items Sold,"          << m.itemsSold                    << "\n\n";
 
     out << "TOP 10 PRODUCTS\nRank,Product,Category,Units Sold,Revenue\n";
     const auto top = getTopProducts(10);
     for (int i = 0; i < top.size(); ++i)
         out << (i+1) << "," << top[i].productName << ","
             << top[i].category << "," << top[i].unitsSold
-            << "," << top[i].revenue << "\n";
+            << "," << top[i].revenue.toMajor() << "\n";
 
     file.close();
     QMessageBox::information(this, "Export Complete",
@@ -657,10 +656,9 @@ void AnalyticsDashboard::onQuickRangeSelected(const QString &range)
 // Helpers
 // ─────────────────────────────────────────────────────────────────────────────
 
-QString AnalyticsDashboard::formatCurrency(double amount)
+QString AnalyticsDashboard::formatCurrency(Money amount)
 {
-    // formatMoney() applies roundCents() (prevents "KSh -0.00") and the
-    // configured currency symbol.
+    // formatMoney() applies the configured currency symbol.
     return formatMoney(amount);
 }
 

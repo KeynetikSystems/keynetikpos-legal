@@ -14,25 +14,26 @@
 #define CART_ITEM_H
 
 #include <QString>
+#include "money.h"
 
 struct CartItem {
     int productId;
     QString name;
-    double price;       // Selling price
-    double costPrice;   // Cost price
+    Money price;        // Selling price (per unit)
+    Money costPrice;    // Cost price (per unit)
     int quantity;
     QString category;
 
-    CartItem() : productId(0), price(0.0), costPrice(0.0), quantity(0) {}
+    CartItem() : productId(0), quantity(0) {}
 
-    CartItem(int id, const QString &n, double p, int q = 1, const QString &cat = "", double cost = 0.0)
+    CartItem(int id, const QString &n, Money p, int q = 1, const QString &cat = "", Money cost = Money())
         : productId(id), name(n), price(p), costPrice(cost), quantity(q), category(cat) {}
 
-    double getSubtotal() const {
+    Money getSubtotal() const {
         return price * quantity;
     }
 
-    double getProfit() const {
+    Money getProfit() const {
         return (price - costPrice) * quantity;
     }
 };

@@ -30,8 +30,8 @@ CheckoutResult CheckoutService::finalizeSale(const Cart &cart,
                                              const CartTotals &t,
                                              const QString &paymentMethod,
                                              const QString &referenceNumber,
-                                             double amountPaid,
-                                             double change) const
+                                             Money amountPaid,
+                                             Money change) const
 {
     CheckoutResult result;
 
@@ -44,7 +44,7 @@ CheckoutResult CheckoutService::finalizeSale(const Cart &cart,
         si.quantity    = item.quantity;
         si.price       = item.price;
         si.costPrice   = item.costPrice;
-        si.subtotal    = roundCents(item.price * item.quantity);
+        si.subtotal    = item.price * item.quantity;
         saleItems.append(si);
     }
 

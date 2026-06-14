@@ -69,6 +69,9 @@
 #include <QPointer>
 #include <QSplitter>
 #include <QStackedWidget>
+#include <QtConcurrent>
+#include <QFutureWatcher>
+#include <QPair>
 #include <cmath>
 
 // -----------------------------------------------------------------------------
@@ -88,7 +91,7 @@ constexpr int DATETIME_UPDATE_MS    = 1000;
 
 // -----------------------------------------------------------------------------
 // File-local helpers
-// (roundCents/formatMoney live in cart.h; CartTotals/computeCartTotals in
+// (Money/formatMoney live in money.h; CartTotals/computeCartTotals in
 //  checkoutservice.h)
 // -----------------------------------------------------------------------------
 static SmtpConfig makeSmtpConfig(const BusinessSettings &bs)
@@ -701,7 +704,7 @@ void MainWindow::setupTotalsSection()
     QGridLayout *totalsLayout = new QGridLayout(totalsGroup);
 
     totalsLayout->addWidget(new QLabel("Subtotal:"), 0, 0);
-    subtotalLabel = new QLabel(formatCurrency(0));
+    subtotalLabel = new QLabel(formatCurrency(Money()));
     subtotalLabel->setProperty("role", "amount");
     subtotalLabel->setAlignment(Qt::AlignRight);
     totalsLayout->addWidget(subtotalLabel, 0, 1);
@@ -709,13 +712,13 @@ void MainWindow::setupTotalsSection()
     taxTitleLabel = new QLabel();
     refreshTaxTitle();
     totalsLayout->addWidget(taxTitleLabel, 1, 0);
-    taxLabel = new QLabel(formatCurrency(0));
+    taxLabel = new QLabel(formatCurrency(Money()));
     taxLabel->setProperty("role", "amount");
     taxLabel->setAlignment(Qt::AlignRight);
     totalsLayout->addWidget(taxLabel, 1, 1);
 
     totalsLayout->addWidget(new QLabel("Discount:"), 2, 0);
-    discountLabel = new QLabel(formatCurrency(0));
+    discountLabel = new QLabel(formatCurrency(Money()));
     discountLabel->setProperty("role", "amountDiscount");
     discountLabel->setAlignment(Qt::AlignRight);
     totalsLayout->addWidget(discountLabel, 2, 1);
@@ -729,7 +732,7 @@ void MainWindow::setupTotalsSection()
     totalTitle->setProperty("role", "totalTitle");
     totalsLayout->addWidget(totalTitle, 4, 0);
 
-    totalLabel = new QLabel(formatCurrency(0));
+    totalLabel = new QLabel(formatCurrency(Money()));
     totalLabel->setProperty("role", "amountTotal");
     totalLabel->setAlignment(Qt::AlignRight);
     totalsLayout->addWidget(totalLabel, 4, 1);
@@ -877,10 +880,10 @@ void MainWindow::updateTotals()
 {
     Cart *activeCart = cartService->current();
     if (!activeCart) {
-        subtotalLabel->setText(formatCurrency(0));
-        taxLabel->setText(formatCurrency(0));
-        discountLabel->setText(formatCurrency(0));
-        totalLabel->setText(formatCurrency(0));
+        subtotalLabel->setText(formatCurrency(Money()));
+        taxLabel->setText(formatCurrency(Money()));
+        discountLabel->setText(formatCurrency(Money()));
+        totalLabel->setText(formatCurrency(Money()));
         return;
     }
 
@@ -955,7 +958,7 @@ void MainWindow::onApplyDiscount()
         }
     }
 
-    const double subtotal = roundCents(activeCart->getSubtotal());
+    const Money subtotal = activeCart->getSubtotal();
     DiscountDialog dialog(subtotal, this);
     if (dialog.exec() == QDialog::Accepted) {
         cartService->setDiscount(dialog.getDiscountAmount(),
@@ -966,7 +969,7 @@ void MainWindow::onApplyDiscount()
         UserManager::instance().logUserAction(
             "Applied Discount",
             QString("Amount: %1, Reason: %2")
-                .arg(dialog.getDiscountAmount())
+                .arg(formatCurrency(dialog.getDiscountAmount()))
                 .arg(dialog.getDiscountReason()));
     }
 }
@@ -997,8 +1000,8 @@ void MainWindow::onCheckout()
     PaymentDialog paymentDialog(t.total, this);
     if (paymentDialog.exec() != QDialog::Accepted) return;
 
-    const double amountPaid = paymentDialog.getAmountPaid();
-    const double change     = paymentDialog.getChange();
+    const Money amountPaid = paymentDialog.getAmountPaid();
+    const Money change     = paymentDialog.getChange();
 
     // CheckoutService runs the pipeline: recordSale (atomic stock check +
     // insert + decrement) -> receipt -> inventory refresh -> audit log.
@@ -1034,7 +1037,7 @@ void MainWindow::onCheckout()
     // Change due is the one figure the cashier must act on, so it stays in the
     // persistent status bar in addition to the auto-dismissing toast. Focus
     // returns to the search box, ready for the next customer.
-    const QString summary = change > 0.0
+    const QString summary = change.cents() > 0
         ? QString("✔ Sale #%1 complete — Change due: %2")
               .arg(result.saleId).arg(formatCurrency(change))
         : QString("✔ Sale #%1 complete — receipt saved").arg(result.saleId);
@@ -1108,7 +1111,7 @@ QString MainWindow::cartTabLabel(const Cart &cart) const
 {
     QString tabText =
         QString("%1 (%2 items)").arg(cart.name).arg(cart.getItemCount());
-    if (cart.getSubtotal() > 0)
+    if (cart.getSubtotal().cents() > 0)
         tabText += QString(" - %1").arg(formatCurrency(cart.getSubtotal()));
     return tabText;
 }
@@ -1419,21 +1422,52 @@ void MainWindow::onEmailReceipt()
         return;
     }
 
-    QApplication::setOverrideCursor(Qt::WaitCursor);
-    const bool sent = receiptPrinter->emailReceipt(receipt, email);
-    QApplication::restoreOverrideCursor();
-
-    if (sent) {
-        statusLabel->setText("Receipt emailed to " + email);
-        UserManager::instance().logUserAction(
-            "Email Receipt",
-            QString("Emailed receipt #%1 to %2").arg(receipt.saleId).arg(email));
-        QMessageBox::information(this, "Receipt Sent",
-                                 "The receipt was emailed to " + email + ".");
-    } else {
-        QMessageBox::warning(this, "Email Failed",
-                             receiptPrinter->getLastError());
+    const SmtpConfig cfg = receiptPrinter->mailConfig();
+    if (!cfg.isConfigured()) {
+        QMessageBox::warning(this, "Email Not Set Up",
+                             "Add your mail server under Settings → Company "
+                             "Information before emailing receipts.");
+        return;
     }
+
+    // Send on a worker thread: SMTP can block for seconds on a slow server, and
+    // the till must stay responsive. We snapshot everything the send needs (a
+    // self-contained SmtpClient, the recipient, subject and rendered HTML) so
+    // the worker never touches shared UI/printer state.
+    const int     saleId  = receipt.saleId;
+    const QString subject = QString("Receipt #%1 from %2")
+                                .arg(saleId)
+                                .arg(settingsManager->businessName());
+    const QString html    = receiptPrinter->renderReceiptHtml(receipt);
+
+    statusLabel->setText("Sending receipt to " + email + "…");
+
+    using SendResult = QPair<bool, QString>;   // {ok, error}
+    auto *watcher = new QFutureWatcher<SendResult>(this);
+    connect(watcher, &QFutureWatcherBase::finished, this,
+            [this, watcher, email, saleId]() {
+        const SendResult res = watcher->result();
+        watcher->deleteLater();
+        if (res.first) {
+            statusLabel->setText("Receipt emailed to " + email);
+            UserManager::instance().logUserAction(
+                "Email Receipt",
+                QString("Emailed receipt #%1 to %2").arg(saleId).arg(email));
+            QMessageBox::information(this, "Receipt Sent",
+                                     "The receipt was emailed to " + email + ".");
+        } else {
+            statusLabel->setText("Email failed");
+            QMessageBox::warning(this, "Email Failed",
+                                 "Failed to email receipt: " + res.second);
+        }
+    });
+
+    watcher->setFuture(QtConcurrent::run([cfg, email, subject, html]() -> SendResult {
+        SmtpClient client(cfg);
+        QString err;
+        const bool ok = client.send(email, subject, html, &err);
+        return { ok, err };
+    }));
 }
 
 void MainWindow::onDailyReport()
@@ -1441,11 +1475,11 @@ void MainWindow::onDailyReport()
     if (!checkPermission(this, Permission::VIEW_REPORTS, "view reports"))
         return;
 
-    const double todaySales       = Database::instance().getTotalSalesToday();
+    const Money  todaySales       = Database::instance().getTotalSalesToday();
     const int    todayTransactions =
         Database::instance().getTotalTransactionsToday();
-    const double average = todayTransactions > 0
-                               ? todaySales / todayTransactions : 0;
+    const Money  average = Money::fromCents(
+        todayTransactions > 0 ? todaySales.cents() / todayTransactions : 0);
 
     // A small structured dialog instead of a plain-text QMessageBox: themed,
     // right-aligned figures, and the total picked out with the totals roles.
@@ -1495,7 +1529,7 @@ void MainWindow::onDailyReport()
     UserManager::instance().logUserAction(
         "Viewed Daily Report",
         QString("Sales: %1, Transactions: %2")
-            .arg(todaySales).arg(todayTransactions));
+            .arg(formatCurrency(todaySales)).arg(todayTransactions));
 }
 
 // =============================================================================
@@ -1694,7 +1728,7 @@ void MainWindow::setupKeyboardShortcuts()
 // Utility
 // =============================================================================
 
-QString MainWindow::formatCurrency(double amount)
+QString MainWindow::formatCurrency(Money amount)
 {
     return formatMoney(amount);
 }

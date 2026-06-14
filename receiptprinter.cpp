@@ -138,7 +138,7 @@ QString ReceiptPrinter::generateReceiptText(const Receipt &receipt)
     stream << padRight("Subtotal:", 30) << formatCurrency(receipt.subtotal) << "\n";
     stream << padRight("Tax:", 30) << formatCurrency(receipt.tax) << "\n";
 
-    if (receipt.discount > 0) {
+    if (receipt.discount.cents() > 0) {
         stream << padRight("Discount:", 30) << "-" << formatCurrency(receipt.discount) << "\n";
         if (!receipt.discountReason.isEmpty()) {
             stream << "  (" << receipt.discountReason << ")\n";
@@ -154,7 +154,7 @@ QString ReceiptPrinter::generateReceiptText(const Receipt &receipt)
     if (!receipt.referenceNumber.isEmpty())
         stream << "Ref: " << receipt.referenceNumber << "\n";
     stream << padRight("Paid:", 30) << formatCurrency(receipt.amountPaid) << "\n";
-    if (receipt.change > 0) {
+    if (receipt.change.cents() > 0) {
         stream << padRight("Change:", 30) << formatCurrency(receipt.change) << "\n";
     }
 
@@ -225,7 +225,7 @@ QString ReceiptPrinter::generateReceiptHTML(const Receipt &receipt)
     stream << "<tr><td>Subtotal:</td><td class='right'>" << formatCurrency(receipt.subtotal) << "</td></tr>";
     stream << "<tr><td>Tax (16%):</td><td class='right'>" << formatCurrency(receipt.tax) << "</td></tr>";
 
-    if (receipt.discount > 0) {
+    if (receipt.discount.cents() > 0) {
         stream << "<tr><td>Discount:";
         if (!receipt.discountReason.isEmpty()) {
             stream << "<br><span class='small'>(" << receipt.discountReason << ")</span>";
@@ -245,7 +245,7 @@ QString ReceiptPrinter::generateReceiptHTML(const Receipt &receipt)
         stream << "<tr><td>Reference:</td><td class='right'>"
                << receipt.referenceNumber.toHtmlEscaped() << "</td></tr>";
     stream << "<tr><td>Amount Paid:</td><td class='right'>" << formatCurrency(receipt.amountPaid) << "</td></tr>";
-    if (receipt.change > 0) {
+    if (receipt.change.cents() > 0) {
         stream << "<tr><td><strong>Change:</strong></td><td class='right'><strong>"
                << formatCurrency(receipt.change) << "</strong></td></tr>";
     }
@@ -355,7 +355,7 @@ QString ReceiptPrinter::getLastError() const
     return lastError;
 }
 
-QString ReceiptPrinter::formatCurrency(double amount) const
+QString ReceiptPrinter::formatCurrency(Money amount) const
 {
     return formatMoney(amount);
 }

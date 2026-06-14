@@ -179,7 +179,7 @@ private:
     void addToCart(const Product &product, int quantity);
 
     // ── Utility ─────────────────────────────────────────────────────────────
-    static QString formatCurrency(double amount);
+    static QString formatCurrency(Money amount);
     void    showToast(const QString &message, const QString &type = "info");
     // Only one toast at a time; a new scan replaces the previous one so rapid
     // scans don't stack overlapping labels.

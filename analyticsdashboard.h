@@ -27,32 +27,34 @@
 #include <QDateTime>
 #include <QVector>
 
+#include "money.h"
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Data structures
 // ─────────────────────────────────────────────────────────────────────────────
 struct SalesMetrics {
-    double totalSales         = 0.0;
-    double totalProfit        = 0.0;
-    double taxCollected       = 0.0;
-    double discountsGiven     = 0.0;
+    Money  totalSales;
+    Money  totalProfit;
+    Money  taxCollected;
+    Money  discountsGiven;
     int    transactionCount   = 0;
     int    itemsSold          = 0;
-    double averageTransaction = 0.0;
+    Money  averageTransaction;
 };
 
 struct ProductPerformance {
     QString productName;
     QString category;
     int     unitsSold    = 0;
-    double  revenue      = 0.0;
-    double  profit       = 0.0;
+    Money   revenue;
+    Money   profit;
     int     timesOrdered = 0;
 };
 
 struct HourlySales {
     int    hour         = 0;
     int    transactions = 0;
-    double sales        = 0.0;
+    Money  sales;
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -95,7 +97,7 @@ private:
     void updateHourlyChart(const QVector<HourlySales> &data);
 
     // Helpers
-    QString formatCurrency(double amount);
+    QString formatCurrency(Money amount);
     QString formatPercentage(double value);
 
     // ── UI Components ──────────────────────────────────────────────────────

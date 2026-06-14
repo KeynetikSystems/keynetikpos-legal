@@ -18,6 +18,8 @@
 #include "appstyle.h"
 #include "cart.h"          // formatMoney(), currencySymbol()
 #include <QVBoxLayout>
+// Plain two-decimal money string (no symbol) for editable/auto cells + CSV.
+static QString money2(Money m) { return QString::number(m.toMajor(), 'f', 2); }
 #include <QHBoxLayout>
 #include <QHeaderView>
 #include <QMessageBox>
@@ -413,7 +415,7 @@ void InventoryDialog::setupAnalyticsTab()
 
     QGroupBox *totalValueCard = new QGroupBox("Total Inventory Value");
     QVBoxLayout *totalValueLayout = new QVBoxLayout(totalValueCard);
-    totalValueLabel = new QLabel(formatMoney(0));
+    totalValueLabel = new QLabel(formatMoney(Money()));
     totalValueLabel->setProperty("role", "statValue");
     totalValueLabel->setProperty("kind", "success");
     totalValueLabel->setAlignment(Qt::AlignCenter);
@@ -618,7 +620,7 @@ void InventoryDialog::updateProductsList()
         QTableWidgetItem *priceItem = new QTableWidgetItem(
             formatCurrency(product.price));
         priceItem->setTextAlignment(Qt::AlignRight | Qt::AlignVCenter);
-        priceItem->setData(Qt::UserRole, product.price);
+        priceItem->setData(Qt::UserRole, QVariant::fromValue<qlonglong>(product.price.cents()));
         inventoryTable->setItem(row, 4, priceItem);
 
         QTableWidgetItem *stockItem = new QTableWidgetItem(
@@ -744,7 +746,7 @@ void InventoryDialog::updateAlertsTable()
 
 void InventoryDialog::updateAnalytics()
 {
-    double totalValue   = 0.0;
+    Money  totalValue;
     int    totalStock   = 0;
     int    productCount = currentInventory.size();
 
@@ -821,7 +823,7 @@ void InventoryDialog::updateStockManagementTable()
         stockManagementTable->setItem(row, 3, new QTableWidgetItem(product.barcode));
 
         QTableWidgetItem *costItem = new QTableWidgetItem(
-            QString::number(product.costPrice, 'f', 2));
+            money2(product.costPrice));
         costItem->setTextAlignment(Qt::AlignRight | Qt::AlignVCenter);
         stockManagementTable->setItem(row, 4, costItem);
 
@@ -831,7 +833,7 @@ void InventoryDialog::updateStockManagementTable()
         stockManagementTable->setItem(row, 5, marginItem);
 
         QTableWidgetItem *priceItem = new QTableWidgetItem(
-            QString::number(product.price, 'f', 2));
+            money2(product.price));
         priceItem->setTextAlignment(Qt::AlignRight | Qt::AlignVCenter);
         priceItem->setFlags(priceItem->flags() & ~Qt::ItemIsEditable);
         priceItem->setBackground(QBrush(QColor(scheme.disabledBg)));
@@ -904,8 +906,7 @@ void InventoryDialog::onStockTableCellChanged(int row, int column)
                            this, &InventoryDialog::onStockTableCellChanged);
 
                 priceItem->setText(
-                    QString::number(
-                        Product::calculateSellingPrice(cost, margin), 'f', 2));
+                    money2(Product::calculateSellingPrice(Money::fromMajor(cost), margin)));
 
                 priceItem->setBackground(QBrush(QColor(scheme.successBg)));
                 const QString readOnlyBg = scheme.disabledBg;
@@ -1104,9 +1105,9 @@ void InventoryDialog::onSaveChangesClicked()
         product.name          = name;
         product.category      = category;
         product.barcode       = barcode.isEmpty() ? generateTempBarcode() : barcode;
-        product.costPrice     = costPrice;
+        product.costPrice     = Money::fromMajor(costPrice);
         product.profitMargin  = profitMargin;
-        product.price         = Product::calculateSellingPrice(costPrice, profitMargin);
+        product.price         = Product::calculateSellingPrice(product.costPrice, profitMargin);
         product.stockQuantity = qty;
         product.reorderLevel  = reorderLevel;
         product.isActive      = true;
@@ -1202,8 +1203,8 @@ void InventoryDialog::onExportClicked()
         Product p = Database::instance().getProductById(info.productId);
         out << info.productId << ",\"" << info.productName << "\",\""
             << info.category  << "\"," << p.barcode        << ","
-            << p.costPrice    << ","   << p.profitMargin   << ","
-            << p.price        << ","   << info.currentQuantity << ",\""
+            << money2(p.costPrice) << ","   << p.profitMargin   << ","
+            << money2(p.price)     << ","   << info.currentQuantity << ",\""
             << inventoryManager->getStatusText(info.status) << "\"\n";
     }
     file.close();
@@ -1282,7 +1283,7 @@ void InventoryDialog::showNotification(const QString &message, NotificationType 
     QTimer::singleShot(3000, this, &InventoryDialog::updateLastUpdatedTime);
 }
 
-QString InventoryDialog::formatCurrency(double amount)
+QString InventoryDialog::formatCurrency(Money amount)
 {
     return formatMoney(amount);
 }
@@ -1561,9 +1562,9 @@ void InventoryDialog::onImportClicked()
         Product p;
         p.name          = name;
         p.category      = category.isEmpty() ? "Uncategorized" : category;
-        p.costPrice     = cost;
+        p.costPrice     = Money::fromMajor(cost);
         p.profitMargin  = margin;
-        p.price         = Product::calculateSellingPrice(cost, margin);
+        p.price         = Product::calculateSellingPrice(p.costPrice, margin);
         p.stockQuantity = qty;
         p.barcode       = barcode;
         p.isActive      = true;

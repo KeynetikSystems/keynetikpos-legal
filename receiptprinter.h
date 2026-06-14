@@ -37,15 +37,15 @@ struct Receipt {
     int saleId = 0;
     QDateTime dateTime;
     QVector<CartItem> items;
-    double subtotal;
-    double tax;
-    double discount;
+    Money subtotal;
+    Money tax;
+    Money discount;
     QString discountReason;
-    double total;
+    Money total;
     QString paymentMethod;
     QString referenceNumber;   // M-Pesa / card transaction code (non-cash)
-    double amountPaid;
-    double change;
+    Money amountPaid;
+    Money change;
     QString customerName;
     QString cashierName;
 };
@@ -74,6 +74,12 @@ public:
     bool reprintLastReceipt();
     bool emailReceipt(const Receipt &receipt, const QString &email);
 
+    // Building blocks for sending a receipt off the UI thread: callers can grab
+    // an immutable copy of the mail config + rendered HTML, then run SmtpClient
+    // on a worker thread without touching this object's shared state.
+    SmtpConfig mailConfig() const { return smtpConfig; }
+    QString    renderReceiptHtml(const Receipt &receipt) { return generateReceiptHTML(receipt); }
+
     // History
     Receipt getLastReceipt();
     bool isConfigured() const;
@@ -87,7 +93,7 @@ private:
     bool saveToPDF(const QString &receiptHTML, const QString &filename);
     void saveLastReceipt(const Receipt &receipt);
 
-    QString formatCurrency(double amount) const;
+    QString formatCurrency(Money amount) const;
     QString centerText(const QString &text, int width) const;
     QString padRight(const QString &text, int width) const;
 

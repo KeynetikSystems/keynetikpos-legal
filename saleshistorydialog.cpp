@@ -113,7 +113,7 @@ void SalesHistoryDialog::setupUI()
 
     QGroupBox *salesCard = new QGroupBox("Total Sales");
     QVBoxLayout *salesLayout = new QVBoxLayout(salesCard);
-    totalSalesLabel = makeStatLabel(formatMoney(0), "success");
+    totalSalesLabel = makeStatLabel(formatMoney(Money()), "success");
     salesLayout->addWidget(totalSalesLabel);
     summaryLayout->addWidget(salesCard);
 
@@ -125,13 +125,13 @@ void SalesHistoryDialog::setupUI()
 
     QGroupBox *avgCard = new QGroupBox("Average Sale");
     QVBoxLayout *avgLayout = new QVBoxLayout(avgCard);
-    avgTransactionLabel = makeStatLabel(formatMoney(0), "tertiary");
+    avgTransactionLabel = makeStatLabel(formatMoney(Money()), "tertiary");
     avgLayout->addWidget(avgTransactionLabel);
     summaryLayout->addWidget(avgCard);
 
     QGroupBox *taxCard = new QGroupBox("Total Tax");
     QVBoxLayout *taxLayout = new QVBoxLayout(taxCard);
-    totalTaxLabel = makeStatLabel(formatMoney(0), "danger");
+    totalTaxLabel = makeStatLabel(formatMoney(Money()), "danger");
     taxLayout->addWidget(totalTaxLabel);
     summaryLayout->addWidget(taxCard);
 
@@ -242,7 +242,7 @@ void SalesHistoryDialog::updateSalesTable()
 
         // Discount
         QTableWidgetItem *discountItem = new QTableWidgetItem(formatCurrency(sale.discount));
-        if (sale.discount > 0) {
+        if (sale.discount.cents() > 0) {
             discountItem->setForeground(QBrush(QColor(scheme.warning)));
             discountItem->setFont(QFont(discountItem->font().family(), -1, QFont::Bold));
         }
@@ -272,8 +272,8 @@ void SalesHistoryDialog::updateSalesTable()
 
 void SalesHistoryDialog::updateSummary()
 {
-    double totalSales = 0.0;
-    double totalTax = 0.0;
+    Money totalSales;
+    Money totalTax;
     int count = salesTable->rowCount();
 
     for (const Sale &sale : sales) {
@@ -281,7 +281,7 @@ void SalesHistoryDialog::updateSummary()
         totalTax += sale.tax;
     }
 
-    double avgTransaction = (count > 0) ? (totalSales / count) : 0.0;
+    Money avgTransaction = Money::fromCents(count > 0 ? totalSales.cents() / count : 0);
 
     totalSalesLabel->setText(formatCurrency(totalSales));
     transactionCountLabel->setText(QString::number(count));
@@ -314,7 +314,7 @@ void SalesHistoryDialog::showSaleDetails(int saleId)
                + QString("Subtotal:  %1\n").arg(formatCurrency(sale.subtotal))
                + QString("Tax (16%%): %1\n").arg(formatCurrency(sale.tax));
 
-    if (sale.discount > 0) {
+    if (sale.discount.cents() > 0) {
         details += QString("Discount:  -%1\n").arg(formatCurrency(sale.discount));
     }
 
@@ -461,10 +461,10 @@ void SalesHistoryDialog::onExportClicked()
         out << sale.id << ","
             << sale.saleDate << ","
             << sale.paymentMethod << ","
-            << sale.subtotal << ","
-            << sale.tax << ","
-            << sale.discount << ","
-            << sale.total << "\n";
+            << sale.subtotal.toMajor() << ","
+            << sale.tax.toMajor() << ","
+            << sale.discount.toMajor() << ","
+            << sale.total.toMajor() << "\n";
     }
 
     file.close();
@@ -519,7 +519,7 @@ void SalesHistoryDialog::onQuickFilterChanged(const QString &filter)
     // Custom Range - don't change dates
 }
 
-QString SalesHistoryDialog::formatCurrency(double amount)
+QString SalesHistoryDialog::formatCurrency(Money amount)
 {
     return formatMoney(amount);
 }

@@ -84,7 +84,7 @@ DiscountResult DiscountManager::applyFixedAmount(double subtotal, double amount,
     r.type      = DiscountType::FixedAmount;
     r.value     = amount;
     r.amount    = qMin(amount, subtotal);
-    r.label     = QString("%1 Off").arg(formatMoney(amount));
+    r.label     = QString("%1 Off").arg(formatMoney(Money::fromMajor(amount)));
     r.appliedBy = cashier;
     return r;
 }

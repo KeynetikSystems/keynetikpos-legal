@@ -16,9 +16,9 @@
 #include <QGroupBox>
 #include <QMessageBox>
 
-DiscountDialog::DiscountDialog(double subtotal, QWidget *parent)
+DiscountDialog::DiscountDialog(Money subtotal, QWidget *parent)
     : QDialog(parent)
-    , subtotal(subtotal)
+    , subtotal(subtotal.toMajor())
     , discountAmount(0.0)
 {
     setWindowTitle("Apply Discount");
@@ -37,7 +37,7 @@ void DiscountDialog::setupUI()
     QVBoxLayout *mainLayout = new QVBoxLayout(this);
 
     // Subtotal display
-    QLabel *subtotalLabel = new QLabel("Subtotal: " + formatMoney(subtotal));
+    QLabel *subtotalLabel = new QLabel("Subtotal: " + formatMoney(Money::fromMajor(subtotal)));
     subtotalLabel->setProperty("role", "banner");
     subtotalLabel->setProperty("kind", "info");
     subtotalLabel->setProperty("textScale", "xl");
@@ -94,13 +94,13 @@ void DiscountDialog::setupUI()
     mainLayout->addSpacing(10);
 
     // Discount summary
-    discountAmountLabel = new QLabel("Discount Amount: " + formatMoney(0));
+    discountAmountLabel = new QLabel("Discount Amount: " + formatMoney(Money()));
     discountAmountLabel->setProperty("kind", "warning");
     discountAmountLabel->setProperty("textScale", "lg");
     discountAmountLabel->setProperty("bold", "true");
     mainLayout->addWidget(discountAmountLabel);
 
-    newTotalLabel = new QLabel("New Total: " + formatMoney(subtotal));
+    newTotalLabel = new QLabel("New Total: " + formatMoney(Money::fromMajor(subtotal)));
     newTotalLabel->setProperty("kind", "success");
     newTotalLabel->setProperty("textScale", "xl");
     newTotalLabel->setProperty("bold", "true");
@@ -164,8 +164,8 @@ void DiscountDialog::calculateDiscount()
 
     double newTotal = subtotal - discountAmount;
 
-    discountAmountLabel->setText("Discount Amount: " + formatMoney(discountAmount));
-    newTotalLabel->setText("New Total: " + formatMoney(newTotal));
+    discountAmountLabel->setText("Discount Amount: " + formatMoney(Money::fromMajor(discountAmount)));
+    newTotalLabel->setText("New Total: " + formatMoney(Money::fromMajor(newTotal)));
 }
 
 void DiscountDialog::onApplyClicked()
@@ -188,9 +188,9 @@ void DiscountDialog::onApplyClicked()
     accept();
 }
 
-double DiscountDialog::getDiscountAmount() const
+Money DiscountDialog::getDiscountAmount() const
 {
-    return discountAmount;
+    return Money::fromMajor(discountAmount);
 }
 
 QString DiscountDialog::getDiscountReason() const

@@ -20,9 +20,9 @@
 #include <QMessageBox>
 #include <cmath>
 
-PaymentDialog::PaymentDialog(double totalAmount, QWidget *parent)
+PaymentDialog::PaymentDialog(Money totalAmount, QWidget *parent)
     : QDialog(parent)
-    , total(totalAmount)
+    , total(totalAmount.toMajor())
     , amountPaid(0.0)
     , change(0.0)
     , paymentMethod("Cash")
@@ -44,7 +44,7 @@ void PaymentDialog::setupUI()
 
     // Total amount display — themed banner (was hardcoded light-blue, which
     // broke in dark mode)
-    totalLabel = new QLabel("Total Amount: " + formatMoney(total));
+    totalLabel = new QLabel("Total Amount: " + formatMoney(Money::fromMajor(total)));
     totalLabel->setProperty("role", "banner");
     totalLabel->setProperty("kind", "success");
     totalLabel->setProperty("textScale", "2xl");
@@ -111,7 +111,7 @@ void PaymentDialog::setupUI()
     refLayout->addWidget(referenceEdit);
     amountLayout->addLayout(refLayout);
 
-    changeLabel = new QLabel("Change: " + formatMoney(0));
+    changeLabel = new QLabel("Change: " + formatMoney(Money()));
     changeLabel->setProperty("kind", "success");
     changeLabel->setProperty("textScale", "xl");
     changeLabel->setProperty("bold", "true");
@@ -208,10 +208,10 @@ void PaymentDialog::calculateChange()
 
     if (change < 0) {
         changeLabel->setText(
-            QString("Change: %1  ⚠ Insufficient").arg(formatMoney(change)));
+            QString("Change: %1  ⚠ Insufficient").arg(formatMoney(Money::fromMajor(change))));
         setStyleProperty(changeLabel, "kind", "danger");
     } else {
-        changeLabel->setText("Change: " + formatMoney(change));
+        changeLabel->setText("Change: " + formatMoney(Money::fromMajor(change)));
         setStyleProperty(changeLabel, "kind", "success");
     }
 
@@ -238,8 +238,8 @@ void PaymentDialog::onConfirmClicked()
 }
 
 QString PaymentDialog::getPaymentMethod()   const { return paymentMethod; }
-double  PaymentDialog::getAmountPaid()      const { return amountPaid;    }
-double  PaymentDialog::getChange()          const { return change;        }
+Money   PaymentDialog::getAmountPaid()      const { return Money::fromMajor(amountPaid); }
+Money   PaymentDialog::getChange()          const { return Money::fromMajor(change);     }
 QString PaymentDialog::getReferenceNumber() const
 {
     return referenceEdit->text().trimmed();

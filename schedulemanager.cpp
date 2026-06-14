@@ -348,27 +348,27 @@ QString ScheduleManager::buildReportBody(const MessageSchedule &s) const
 
     switch (s.reportType) {
     case MessageSchedule::ZReport: {
-        double todaySales = Database::instance().getTotalSalesToday();
+        Money todaySales = Database::instance().getTotalSalesToday();
         int todayTx      = Database::instance().getTotalTransactionsToday();
-        double profit    = Database::instance().getActualGrossProfitToday();
+        Money profit     = Database::instance().getActualGrossProfitToday();
         return QString("📊 *%1*\n"
                        "📅 %2\n\n"
                        "💰 Total Sales: KES %3\n"
                        "🧾 Transactions: %4\n"
                        "📈 Gross Profit: KES %5")
             .arg(title, dateStr)
-            .arg(todaySales, 0, 'f', 2)
+            .arg(todaySales.toMajor(), 0, 'f', 2)
             .arg(todayTx)
-            .arg(profit, 0, 'f', 2);
+            .arg(profit.toMajor(), 0, 'f', 2);
     }
     case MessageSchedule::SalesSummary: {
-        double todaySales = Database::instance().getTotalSalesToday();
+        Money todaySales = Database::instance().getTotalSalesToday();
         int todayTx      = Database::instance().getTotalTransactionsToday();
         return QString("💵 *%1*\n"
                        "📅 %2\n\n"
                        "Sales: KES %3  |  Transactions: %4")
             .arg(title, dateStr)
-            .arg(todaySales, 0, 'f', 2)
+            .arg(todaySales.toMajor(), 0, 'f', 2)
             .arg(todayTx);
     }
     case MessageSchedule::InventoryAlert:

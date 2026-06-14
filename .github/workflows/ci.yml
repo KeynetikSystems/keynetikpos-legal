@@ -1,0 +1,59 @@
+name: CI
+
+on:
+  push:
+    branches: [ main, master ]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  # Fast, cross-platform job: builds and runs the unit/characterization tests.
+  # These targets link only Qt Core/Sql/Test (no Widgets, no Windows-only
+  # registry/DPAPI/anti-debug code), so they build and run cleanly on Linux.
+  tests:
+    name: Unit tests (Linux)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Qt
+        uses: jurplel/install-qt-action@v4
+        with:
+          version: '6.8.1'
+          modules: 'qtserialport'
+          cache: true
+
+      - name: Configure
+        run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DKEYNETIK_BUILD_TESTS=ON
+
+      # Build only the test targets — the full GUI app pulls in Windows-only
+      # APIs that don't compile on Linux.
+      - name: Build tests
+        run: cmake --build build --target carttotals_test database_test -j
+
+      - name: Run tests
+        run: ctest --test-dir build --output-on-failure
+
+  # Full application build on Windows (the shipping platform). Catches breakage
+  # in the GUI / Windows-only code that the Linux test job can't see.
+  build-windows:
+    name: Full build (Windows)
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Qt
+        uses: jurplel/install-qt-action@v4
+        with:
+          version: '6.8.1'
+          modules: 'qtserialport'
+          cache: true
+
+      - name: Configure
+        run: cmake -S . -B build -DKEYNETIK_BUILD_TESTS=ON
+
+      - name: Build
+        run: cmake --build build --config Release -j
+
+      - name: Run tests
+        run: ctest --test-dir build -C Release --output-on-failure

@@ -10,8 +10,8 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 # ============================================================
 # Find Qt
 # ============================================================
-find_package(QT NAMES Qt6 Qt5 REQUIRED COMPONENTS Widgets Core Sql PrintSupport Network)
-find_package(Qt${QT_VERSION_MAJOR} REQUIRED COMPONENTS Widgets Core Sql PrintSupport Network)
+find_package(QT NAMES Qt6 Qt5 REQUIRED COMPONENTS Widgets Core Sql PrintSupport Network Concurrent)
+find_package(Qt${QT_VERSION_MAJOR} REQUIRED COMPONENTS Widgets Core Sql PrintSupport Network Concurrent)
 find_package(Qt${QT_VERSION_MAJOR} REQUIRED COMPONENTS SerialPort)
 
 # ============================================================
@@ -65,6 +65,7 @@ set(PROJECT_SOURCES
     analyticsdashboard.cpp analyticsdashboard.h
     receiptprinter.cpp receiptprinter.h
     smtpclient.cpp smtpclient.h
+    secretstore.cpp secretstore.h
     saleshistorydialog.cpp saleshistorydialog.h
     colorscheme.cpp colorscheme.h
     user.cpp user.h
@@ -105,14 +106,32 @@ endif()
 
 target_include_directories(KeynetikPOS PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 
+# ============================================================
+# Warnings — surface bugs the compiler can already see. Not -Werror:
+# the existing tree has pre-existing warnings, and a hard failure would
+# block builds before they can be cleaned up incrementally.
+# ============================================================
+if(MSVC)
+    set(KEYNETIK_WARNINGS /W4)
+else()
+    set(KEYNETIK_WARNINGS -Wall -Wextra)
+endif()
+target_compile_options(KeynetikPOS PRIVATE ${KEYNETIK_WARNINGS})
+
 target_link_libraries(KeynetikPOS PRIVATE
     Qt${QT_VERSION_MAJOR}::Widgets
     Qt${QT_VERSION_MAJOR}::Core
     Qt${QT_VERSION_MAJOR}::Sql
     Qt${QT_VERSION_MAJOR}::PrintSupport
     Qt${QT_VERSION_MAJOR}::Network
+    Qt${QT_VERSION_MAJOR}::Concurrent
 )
 target_link_libraries(KeynetikPOS PRIVATE Qt${QT_VERSION_MAJOR}::SerialPort)
+
+# DPAPI (CryptProtectData) for SecretStore — Windows credential encryption.
+if(WIN32)
+    target_link_libraries(KeynetikPOS PRIVATE crypt32)
+endif()
 
 # ============================================================
 # Deployment Logic (windeployqt)
@@ -234,6 +253,7 @@ if(KEYNETIK_BUILD_TESTS)
     )
     set_target_properties(carttotals_test PROPERTIES AUTOMOC ON)
     target_include_directories(carttotals_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+    target_compile_options(carttotals_test PRIVATE ${KEYNETIK_WARNINGS})
     # Qt::Sql is linked only so settingsmanager.h's <QSqlDatabase> include
     # resolves when carttotals.cpp pulls in BusinessSettings — the test uses no
     # database itself.
@@ -243,4 +263,21 @@ if(KEYNETIK_BUILD_TESTS)
         Qt${QT_VERSION_MAJOR}::Test
     )
     add_test(NAME carttotals_test COMMAND carttotals_test)
+
+    # Characterization tests for the money path (recordSale / processRefund).
+    # Links database.cpp against an in-memory SQLite DB — no Widgets, no UI.
+    add_executable(database_test
+        tests/database_test.cpp
+        database.cpp database.h
+    )
+    set_target_properties(database_test PROPERTIES AUTOMOC ON)
+    target_include_directories(database_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+    target_compile_options(database_test PRIVATE ${KEYNETIK_WARNINGS})
+    target_link_libraries(database_test PRIVATE
+        Qt${QT_VERSION_MAJOR}::Core
+        Qt${QT_VERSION_MAJOR}::Sql
+        Qt${QT_VERSION_MAJOR}::Network
+        Qt${QT_VERSION_MAJOR}::Test
+    )
+    add_test(NAME database_test COMMAND database_test)
 endif()

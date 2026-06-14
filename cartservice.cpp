@@ -183,13 +183,13 @@ void CartService::clearCurrent()
     if (!cart) return;
 
     cart->items.clear();
-    cart->discount       = 0.0;
+    cart->discount       = Money();
     cart->discountReason = "";
     cart->touch();
     emit cartContentChanged(m_currentId);
 }
 
-void CartService::setDiscount(double amount, const QString &reason)
+void CartService::setDiscount(Money amount, const QString &reason)
 {
     Cart *cart = current();
     if (!cart) return;

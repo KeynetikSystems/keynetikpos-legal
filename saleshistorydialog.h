@@ -51,7 +51,7 @@ private:
     void updateSalesTable();
     void updateSummary();
     void showSaleDetails(int saleId);
-    QString formatCurrency(double amount);
+    QString formatCurrency(Money amount);
 
     // UI Components
     QDateEdit *startDateEdit;

@@ -17,7 +17,7 @@
 // =============================================================================
 #include "database.h"
 #include "passwordhasher.h"
-#include "cart.h"            // roundCents()
+#include "money.h"           // Money
 #include <QSqlQuery>
 #include <QSqlError>
 #include <QVariant>
@@ -62,7 +62,21 @@ Database::~Database()
     }
 }
 
-bool Database::initialize()
+void Database::configureForTesting(const QString &dbPath)
+{
+    const QString conn = QStringLiteral("keynetik_test");
+    if (db.isOpen())
+        db.close();
+    db = QSqlDatabase();   // drop our handle so removeDatabase() won't warn
+    if (QSqlDatabase::contains(conn))
+        QSqlDatabase::removeDatabase(conn);
+    db = QSqlDatabase::addDatabase(QStringLiteral("QSQLITE"), conn);
+    db.setDatabaseName(dbPath);
+    m_dbPath = dbPath;
+    initialized = false;
+}
+
+bool Database::initialize(bool seedSampleData)
 {
     // Idempotent: main() initializes the DB, and so does the MainWindow ctor
     // (which is rebuilt on every logout->login). Re-running open() makes the
@@ -95,10 +109,10 @@ bool Database::initialize()
     }
     qDebug() << "Tables created successfully";
 
-    // Insert sample data if tables are empty
-    QSqlQuery query("SELECT COUNT(*) FROM products");
-    if (query.exec()) {
-        if (query.next()) {
+    // Insert sample data if tables are empty (skipped under tests)
+    if (seedSampleData) {
+        QSqlQuery query(db);
+        if (query.exec("SELECT COUNT(*) FROM products") && query.next()) {
             int count = query.value(0).toInt();
             qDebug() << "Current product count:" << count;
             if (count == 0) {
@@ -111,9 +125,9 @@ bool Database::initialize()
             } else {
                 qDebug() << "Database already has products, skipping sample data";
             }
+        } else {
+            qDebug() << "Failed to query product count:" << query.lastError().text();
         }
-    } else {
-        qDebug() << "Failed to query product count:" << query.lastError().text();
     }
     initialized = true;
     return true;
@@ -161,8 +175,8 @@ bool Database::createTables()
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             name TEXT NOT NULL,
             category TEXT NOT NULL,
-            price REAL NOT NULL,
-            cost_price REAL NOT NULL DEFAULT 0,
+            price INTEGER NOT NULL,
+            cost_price INTEGER NOT NULL DEFAULT 0,
             profit_margin REAL NOT NULL DEFAULT 0,
             stock_quantity INTEGER DEFAULT 0,
             reorder_level INTEGER NOT NULL DEFAULT 20,
@@ -177,13 +191,13 @@ bool Database::createTables()
         CREATE TABLE IF NOT EXISTS sales (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             sale_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            subtotal REAL NOT NULL,
-            tax REAL DEFAULT 0,
-            discount REAL DEFAULT 0,
-            total REAL NOT NULL,
+            subtotal INTEGER NOT NULL,
+            tax INTEGER DEFAULT 0,
+            discount INTEGER DEFAULT 0,
+            total INTEGER NOT NULL,
             payment_method TEXT DEFAULT 'Cash',
-            amount_paid REAL DEFAULT 0,
-            change_due REAL DEFAULT 0
+            amount_paid INTEGER DEFAULT 0,
+            change_due INTEGER DEFAULT 0
         )
     )";
     // Sale items table
@@ -194,9 +208,9 @@ bool Database::createTables()
             product_id INTEGER NOT NULL,
             product_name TEXT NOT NULL,
             quantity INTEGER NOT NULL,
-            price REAL NOT NULL,
-            cost_price REAL NOT NULL DEFAULT 0,
-            subtotal REAL NOT NULL,
+            price INTEGER NOT NULL,
+            cost_price INTEGER NOT NULL DEFAULT 0,
+            subtotal INTEGER NOT NULL,
             FOREIGN KEY (sale_id) REFERENCES sales(id),
             FOREIGN KEY (product_id) REFERENCES products(id)
         )
@@ -261,7 +275,7 @@ bool Database::createTables()
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             sale_id INTEGER NOT NULL,
             refund_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            total_refunded REAL NOT NULL,
+            total_refunded INTEGER NOT NULL,
             reason TEXT,
             processed_by TEXT,
             FOREIGN KEY (sale_id) REFERENCES sales(id)
@@ -280,12 +294,62 @@ bool Database::createTables()
 
     // Migrations for databases created before these columns existed
     // (CREATE TABLE IF NOT EXISTS does not alter existing tables)
-    ensureColumn("sales", "amount_paid", "REAL DEFAULT 0");
-    ensureColumn("sales", "change_due", "REAL DEFAULT 0");
+    ensureColumn("sales", "amount_paid", "INTEGER DEFAULT 0");
+    ensureColumn("sales", "change_due", "INTEGER DEFAULT 0");
     ensureColumn("users", "must_change_password", "INTEGER DEFAULT 0");
     ensureColumn("products", "reorder_level", "INTEGER NOT NULL DEFAULT 20");
 
+    if (!migrateMoneyToCents())
+        return false;
+
     return true;
+}
+
+// One-time conversion of money columns from REAL major units (e.g. 19.99) to
+// INTEGER minor units (1999). Keyed on PRAGMA user_version so it runs exactly
+// once per database. A freshly-created DB has no rows yet (sample data is seeded
+// afterwards), so the UPDATEs are harmless no-ops there; only a pre-existing
+// (legacy) database actually has values to scale. Runs in a transaction and
+// only bumps the version on success, so a failure is safely retried next launch.
+bool Database::migrateMoneyToCents()
+{
+    int userVersion = 0;
+    {
+        QSqlQuery ver(db);
+        if (ver.exec("PRAGMA user_version") && ver.next())
+            userVersion = ver.value(0).toInt();
+    }
+    if (userVersion >= 1)
+        return true;
+
+    static const char *const updates[] = {
+        "UPDATE products SET price=CAST(ROUND(price*100) AS INTEGER), "
+        "cost_price=CAST(ROUND(cost_price*100) AS INTEGER)",
+        "UPDATE sales SET subtotal=CAST(ROUND(subtotal*100) AS INTEGER), "
+        "tax=CAST(ROUND(tax*100) AS INTEGER), "
+        "discount=CAST(ROUND(discount*100) AS INTEGER), "
+        "total=CAST(ROUND(total*100) AS INTEGER), "
+        "amount_paid=CAST(ROUND(amount_paid*100) AS INTEGER), "
+        "change_due=CAST(ROUND(change_due*100) AS INTEGER)",
+        "UPDATE sale_items SET price=CAST(ROUND(price*100) AS INTEGER), "
+        "cost_price=CAST(ROUND(cost_price*100) AS INTEGER), "
+        "subtotal=CAST(ROUND(subtotal*100) AS INTEGER)",
+        "UPDATE refunds SET total_refunded=CAST(ROUND(total_refunded*100) AS INTEGER)",
+    };
+
+    db.transaction();
+    for (const char *sql : updates) {
+        QSqlQuery u(db);
+        if (!u.exec(QLatin1String(sql))) {
+            lastError = "Money migration failed: " + u.lastError().text();
+            qDebug() << lastError;
+            db.rollback();
+            return false;
+        }
+    }
+    QSqlQuery setv(db);
+    setv.exec("PRAGMA user_version = 1");
+    return db.commit();
 }
 
 bool Database::ensureColumn(const QString &table, const QString &column,
@@ -366,17 +430,17 @@ bool Database::insertSampleData()
     };
 
     for (const QVariantList &product : products) {
-        double costPrice = product[2].toDouble();
-        double profitMargin = product[3].toDouble();
-        double sellingPrice = Product::calculateSellingPrice(costPrice, profitMargin);
+        const Money  costPrice    = Money::fromMajor(product[2].toDouble());
+        const double profitMargin = product[3].toDouble();
+        const Money  sellingPrice = Product::calculateSellingPrice(costPrice, profitMargin);
 
         QSqlQuery query(db);
         query.prepare("INSERT INTO products (name, category, cost_price, profit_margin, price, stock_quantity, barcode) VALUES (?, ?, ?, ?, ?, ?, ?)");
         query.addBindValue(product[0]);
         query.addBindValue(product[1]);
-        query.addBindValue(costPrice);
+        query.addBindValue(costPrice.cents());
         query.addBindValue(profitMargin);
-        query.addBindValue(sellingPrice);
+        query.addBindValue(sellingPrice.cents());
         query.addBindValue(product[4]);
         query.addBindValue(product[5]);
 
@@ -430,8 +494,8 @@ QVector<Product> Database::getAllProducts()
         p.id = query.value(0).toInt();
         p.name = query.value(1).toString();
         p.category = query.value(2).toString();
-        p.price = query.value(3).toDouble();
-        p.costPrice = query.value(4).toDouble();
+        p.price = Money::fromCents(query.value(3).toLongLong());
+        p.costPrice = Money::fromCents(query.value(4).toLongLong());
         p.profitMargin = query.value(5).toDouble();
         p.stockQuantity = query.value(6).toInt();
         p.reorderLevel = query.value(7).toInt();
@@ -454,8 +518,8 @@ QVector<Product> Database::getProductsByCategory(const QString &category)
         p.id = query.value(0).toInt();
         p.name = query.value(1).toString();
         p.category = query.value(2).toString();
-        p.price = query.value(3).toDouble();
-        p.costPrice = query.value(4).toDouble();
+        p.price = Money::fromCents(query.value(3).toLongLong());
+        p.costPrice = Money::fromCents(query.value(4).toLongLong());
         p.profitMargin = query.value(5).toDouble();
         p.stockQuantity = query.value(6).toInt();
         p.reorderLevel = query.value(7).toInt();
@@ -477,8 +541,8 @@ Product Database::getProductById(int id)
         p.id = query.value(0).toInt();
         p.name = query.value(1).toString();
         p.category = query.value(2).toString();
-        p.price = query.value(3).toDouble();
-        p.costPrice = query.value(4).toDouble();
+        p.price = Money::fromCents(query.value(3).toLongLong());
+        p.costPrice = Money::fromCents(query.value(4).toLongLong());
         p.profitMargin = query.value(5).toDouble();
         p.stockQuantity = query.value(6).toInt();
         p.reorderLevel = query.value(7).toInt();
@@ -499,8 +563,8 @@ Product Database::getProductByBarcode(const QString &barcode)
         p.id = query.value(0).toInt();
         p.name = query.value(1).toString();
         p.category = query.value(2).toString();
-        p.price = query.value(3).toDouble();
-        p.costPrice = query.value(4).toDouble();
+        p.price = Money::fromCents(query.value(3).toLongLong());
+        p.costPrice = Money::fromCents(query.value(4).toLongLong());
         p.profitMargin = query.value(5).toDouble();
         p.stockQuantity = query.value(6).toInt();
         p.reorderLevel = query.value(7).toInt();
@@ -513,13 +577,13 @@ Product Database::getProductByBarcode(const QString &barcode)
 bool Database::addProduct(const Product &product)
 {
     QSqlQuery query(db);
-    double sellingPrice = Product::calculateSellingPrice(product.costPrice, product.profitMargin);
+    const Money sellingPrice = Product::calculateSellingPrice(product.costPrice, product.profitMargin);
     query.prepare("INSERT INTO products (name, category, cost_price, profit_margin, price, stock_quantity, reorder_level, barcode) VALUES (?, ?, ?, ?, ?, ?, ?, ?)");
     query.addBindValue(product.name);
     query.addBindValue(product.category);
-    query.addBindValue(product.costPrice);
+    query.addBindValue(product.costPrice.cents());
     query.addBindValue(product.profitMargin);
-    query.addBindValue(sellingPrice);
+    query.addBindValue(sellingPrice.cents());
     query.addBindValue(product.stockQuantity);
     query.addBindValue(product.reorderLevel);
     query.addBindValue(product.barcode);
@@ -533,13 +597,13 @@ bool Database::addProduct(const Product &product)
 bool Database::updateProduct(const Product &product)
 {
     QSqlQuery query(db);
-    double sellingPrice = Product::calculateSellingPrice(product.costPrice, product.profitMargin);
+    const Money sellingPrice = Product::calculateSellingPrice(product.costPrice, product.profitMargin);
     query.prepare("UPDATE products SET name = ?, category = ?, cost_price = ?, profit_margin = ?, price = ?, stock_quantity = ?, reorder_level = ?, barcode = ?, is_active = ? WHERE id = ?");
     query.addBindValue(product.name);
     query.addBindValue(product.category);
-    query.addBindValue(product.costPrice);
+    query.addBindValue(product.costPrice.cents());
     query.addBindValue(product.profitMargin);
-    query.addBindValue(sellingPrice);
+    query.addBindValue(sellingPrice.cents());
     query.addBindValue(product.stockQuantity);
     query.addBindValue(product.reorderLevel);
     query.addBindValue(product.barcode);
@@ -632,9 +696,9 @@ int Database::getStock(int productId)
 // ==================== Sales operations ====================
 
 int Database::recordSale(const QVector<SaleItem> &items,
-                         double subtotal, double tax, double discount, double total,
+                         Money subtotal, Money tax, Money discount, Money total,
                          const QString &paymentMethod,
-                         double amountPaid, double changeDue)
+                         Money amountPaid, Money changeDue)
 {
     if (items.isEmpty()) {
         lastError = "Cannot record a sale with no items";
@@ -669,13 +733,13 @@ int Database::recordSale(const QVector<SaleItem> &items,
     QSqlQuery saleQuery(db);
     saleQuery.prepare("INSERT INTO sales (subtotal, tax, discount, total, payment_method, amount_paid, change_due) "
                       "VALUES (?, ?, ?, ?, ?, ?, ?)");
-    saleQuery.addBindValue(subtotal);
-    saleQuery.addBindValue(tax);
-    saleQuery.addBindValue(discount);
-    saleQuery.addBindValue(total);
+    saleQuery.addBindValue(subtotal.cents());
+    saleQuery.addBindValue(tax.cents());
+    saleQuery.addBindValue(discount.cents());
+    saleQuery.addBindValue(total.cents());
     saleQuery.addBindValue(paymentMethod);
-    saleQuery.addBindValue(amountPaid);
-    saleQuery.addBindValue(changeDue);
+    saleQuery.addBindValue(amountPaid.cents());
+    saleQuery.addBindValue(changeDue.cents());
     if (!saleQuery.exec()) {
         lastError = saleQuery.lastError().text();
         db.rollback();
@@ -691,9 +755,9 @@ int Database::recordSale(const QVector<SaleItem> &items,
         itemQuery.addBindValue(item.productId);
         itemQuery.addBindValue(item.productName);
         itemQuery.addBindValue(item.quantity);
-        itemQuery.addBindValue(item.price);
-        itemQuery.addBindValue(item.costPrice);
-        itemQuery.addBindValue(roundCents(item.price * item.quantity));
+        itemQuery.addBindValue(item.price.cents());
+        itemQuery.addBindValue(item.costPrice.cents());
+        itemQuery.addBindValue((item.price * item.quantity).cents());
         if (!itemQuery.exec()) {
             lastError = itemQuery.lastError().text();
             db.rollback();
@@ -729,13 +793,13 @@ QVector<Sale> Database::getAllSales()
         Sale s;
         s.id = query.value(0).toInt();
         s.saleDate = query.value(1).toString();
-        s.subtotal = query.value(2).toDouble();
-        s.tax = query.value(3).toDouble();
-        s.discount = query.value(4).toDouble();
-        s.total = query.value(5).toDouble();
+        s.subtotal = Money::fromCents(query.value(2).toLongLong());
+        s.tax = Money::fromCents(query.value(3).toLongLong());
+        s.discount = Money::fromCents(query.value(4).toLongLong());
+        s.total = Money::fromCents(query.value(5).toLongLong());
         s.paymentMethod = query.value(6).toString();
-        s.amountPaid = query.value(7).toDouble();
-        s.changeDue = query.value(8).toDouble();
+        s.amountPaid = Money::fromCents(query.value(7).toLongLong());
+        s.changeDue = Money::fromCents(query.value(8).toLongLong());
         sales.append(s);
     }
     return sales;
@@ -753,13 +817,13 @@ QVector<Sale> Database::getSalesByDateRange(const QString &startDate, const QStr
         Sale s;
         s.id = query.value(0).toInt();
         s.saleDate = query.value(1).toString();
-        s.subtotal = query.value(2).toDouble();
-        s.tax = query.value(3).toDouble();
-        s.discount = query.value(4).toDouble();
-        s.total = query.value(5).toDouble();
+        s.subtotal = Money::fromCents(query.value(2).toLongLong());
+        s.tax = Money::fromCents(query.value(3).toLongLong());
+        s.discount = Money::fromCents(query.value(4).toLongLong());
+        s.total = Money::fromCents(query.value(5).toLongLong());
         s.paymentMethod = query.value(6).toString();
-        s.amountPaid = query.value(7).toDouble();
-        s.changeDue = query.value(8).toDouble();
+        s.amountPaid = Money::fromCents(query.value(7).toLongLong());
+        s.changeDue = Money::fromCents(query.value(8).toLongLong());
         sales.append(s);
     }
     return sales;
@@ -779,9 +843,9 @@ QVector<SaleItem> Database::getSaleItems(int saleId)
         item.productId = query.value(2).toInt();
         item.productName = query.value(3).toString();
         item.quantity = query.value(4).toInt();
-        item.price = query.value(5).toDouble();
-        item.costPrice = query.value(6).toDouble();
-        item.subtotal = query.value(7).toDouble();
+        item.price = Money::fromCents(query.value(5).toLongLong());
+        item.costPrice = Money::fromCents(query.value(6).toLongLong());
+        item.subtotal = Money::fromCents(query.value(7).toLongLong());
         items.append(item);
     }
     return items;
@@ -797,37 +861,37 @@ Sale Database::getSaleById(int saleId)
     if (query.next()) {
         s.id = query.value(0).toInt();
         s.saleDate = query.value(1).toString();
-        s.subtotal = query.value(2).toDouble();
-        s.tax = query.value(3).toDouble();
-        s.discount = query.value(4).toDouble();
-        s.total = query.value(5).toDouble();
+        s.subtotal = Money::fromCents(query.value(2).toLongLong());
+        s.tax = Money::fromCents(query.value(3).toLongLong());
+        s.discount = Money::fromCents(query.value(4).toLongLong());
+        s.total = Money::fromCents(query.value(5).toLongLong());
         s.paymentMethod = query.value(6).toString();
-        s.amountPaid = query.value(7).toDouble();
-        s.changeDue = query.value(8).toDouble();
+        s.amountPaid = Money::fromCents(query.value(7).toLongLong());
+        s.changeDue = Money::fromCents(query.value(8).toLongLong());
     }
     return s;
 }
 
 // ==================== Analytics ====================
 
-double Database::getTotalSalesToday()
+Money Database::getTotalSalesToday()
 {
     QSqlQuery query(db);
     query.prepare("SELECT SUM(total) FROM sales WHERE DATE(sale_date) = DATE('now')");
     if (query.exec() && query.next()) {
-        return query.value(0).toDouble();
+        return Money::fromCents(query.value(0).toLongLong());
     }
-    return 0.0;
+    return Money();
 }
 
-double Database::getTotalSalesThisMonth()
+Money Database::getTotalSalesThisMonth()
 {
     QSqlQuery query(db);
     query.prepare("SELECT SUM(total) FROM sales WHERE strftime('%Y-%m', sale_date) = strftime('%Y-%m', 'now')");
     if (query.exec() && query.next()) {
-        return query.value(0).toDouble();
+        return Money::fromCents(query.value(0).toLongLong());
     }
-    return 0.0;
+    return Money();
 }
 
 int Database::getTotalTransactionsToday()
@@ -927,7 +991,7 @@ bool Database::processRefund(int saleId, const QString &reason, const QString &p
     q.prepare("INSERT INTO refunds (sale_id, total_refunded, reason, processed_by) "
               "VALUES (?, ?, ?, ?)");
     q.addBindValue(saleId);
-    q.addBindValue(sale.total);
+    q.addBindValue(sale.total.cents());
     q.addBindValue(reason);
     q.addBindValue(processedBy);
     if (!q.exec()) {
@@ -1060,7 +1124,7 @@ bool Database::executeQuery(const QString &queryStr)
 
 // ==================== Profit calculation methods ====================
 
-double Database::getActualGrossProfit(const QString &startDate, const QString &endDate)
+Money Database::getActualGrossProfit(const QString &startDate, const QString &endDate)
 {
     QSqlQuery query(db);
     query.prepare(
@@ -1071,12 +1135,12 @@ double Database::getActualGrossProfit(const QString &startDate, const QString &e
     query.addBindValue(startDate);
     query.addBindValue(endDate);
     if (query.exec() && query.next()) {
-        return query.value("total_profit").toDouble();
+        return Money::fromCents(query.value("total_profit").toLongLong());
     }
-    return 0.0;
+    return Money();
 }
 
-double Database::getActualGrossProfitToday()
+Money Database::getActualGrossProfitToday()
 {
     QSqlQuery query(db);
     query.prepare(
@@ -1085,12 +1149,12 @@ double Database::getActualGrossProfitToday()
         "JOIN sales s ON si.sale_id = s.id "
         "WHERE DATE(s.sale_date) = DATE('now')");
     if (query.exec() && query.next()) {
-        return query.value("total_profit").toDouble();
+        return Money::fromCents(query.value("total_profit").toLongLong());
     }
-    return 0.0;
+    return Money();
 }
 
-double Database::getActualGrossProfitThisMonth()
+Money Database::getActualGrossProfitThisMonth()
 {
     QSqlQuery query(db);
     query.prepare(
@@ -1099,7 +1163,7 @@ double Database::getActualGrossProfitThisMonth()
         "JOIN sales s ON si.sale_id = s.id "
         "WHERE strftime('%Y-%m', s.sale_date) = strftime('%Y-%m', 'now')");
     if (query.exec() && query.next()) {
-        return query.value("total_profit").toDouble();
+        return Money::fromCents(query.value("total_profit").toLongLong());
     }
-    return 0.0;
+    return Money();
 }

@@ -50,7 +50,7 @@ public:
     bool removeItemAt(int index);
     bool setItemQuantity(int index, int quantity);
     void clearCurrent();                    // items + discount
-    void setDiscount(double amount, const QString &reason);
+    void setDiscount(Money amount, const QString &reason);
 
 signals:
     void cartListChanged();

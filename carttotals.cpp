@@ -12,26 +12,28 @@
 // =============================================================================
 #include "carttotals.h"
 
-#include "cart.h"        // roundCents()
 #include <QtGlobal>      // qBound
+#include <cmath>         // std::llround
 
-CartTotals computeCartTotals(double subtotal, double discount,
+CartTotals computeCartTotals(Money subtotal, Money discount,
                              const BusinessSettings &bs)
 {
     CartTotals t;
-    t.subtotal = roundCents(subtotal);
-    t.discount = roundCents(qBound(0.0, discount, t.subtotal));
-    const double base = t.subtotal - t.discount;
+    t.subtotal = subtotal;
+    t.discount = qBound(Money::fromCents(0), discount, t.subtotal);
+    const Money base = t.subtotal - t.discount;
 
     if (!bs.taxEnabled || bs.taxRate <= 0.0) {
-        t.tax   = 0.0;
-        t.total = roundCents(base);
+        t.tax   = Money::fromCents(0);
+        t.total = base;
     } else if (bs.taxInclusive) {
-        t.tax   = roundCents(base - base / (1.0 + bs.taxRate));
-        t.total = roundCents(base);
+        // base already includes tax: tax = base - base/(1+rate), rounded once.
+        const qint64 net = std::llround(base.cents() / (1.0 + bs.taxRate));
+        t.tax   = base - Money::fromCents(net);
+        t.total = base;
     } else {
-        t.tax   = roundCents(base * bs.taxRate);
-        t.total = roundCents(base + t.tax);
+        t.tax   = Money::fromCents(std::llround(base.cents() * bs.taxRate));
+        t.total = base + t.tax;
     }
     return t;
 }

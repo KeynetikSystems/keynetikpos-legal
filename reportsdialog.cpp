@@ -9,7 +9,7 @@
 //    of the table through QTextDocument/QPrinter.
 // =============================================================================
 #include "reportsdialog.h"
-#include "cart.h"          // formatMoney()
+#include "money.h"         // Money, formatMoney()
 #include <QVBoxLayout>
 #include <QHBoxLayout>
 #include <QGroupBox>
@@ -22,6 +22,9 @@
 #include <QTextDocument>
 #include <QApplication>
 #include <QPalette>
+
+// Plain two-decimal money string (no currency symbol) for table cells and CSV.
+static QString money2(Money m) { return QString::number(m.toMajor(), 'f', 2); }
 
 ReportsDialog::ReportsDialog(QWidget *parent)
     : QDialog(parent)
@@ -148,9 +151,9 @@ void ReportsDialog::generateSalesByDateReport()
     reportTable->setRowCount(0);
 
     reportData.clear();
-    double totalSales = 0.0;
-    double totalTax = 0.0;
-    double totalDiscount = 0.0;
+    Money totalSales;
+    Money totalTax;
+    Money totalDiscount;
 
     for (const Sale &sale : sales) {
         int row = reportTable->rowCount();
@@ -158,10 +161,10 @@ void ReportsDialog::generateSalesByDateReport()
 
         reportTable->setItem(row, 0, new QTableWidgetItem(QString::number(sale.id)));
         reportTable->setItem(row, 1, new QTableWidgetItem(sale.saleDate));
-        reportTable->setItem(row, 2, new QTableWidgetItem(QString::number(sale.subtotal, 'f', 2)));
-        reportTable->setItem(row, 3, new QTableWidgetItem(QString::number(sale.tax, 'f', 2)));
-        reportTable->setItem(row, 4, new QTableWidgetItem(QString::number(sale.discount, 'f', 2)));
-        reportTable->setItem(row, 5, new QTableWidgetItem(QString::number(sale.total, 'f', 2)));
+        reportTable->setItem(row, 2, new QTableWidgetItem(money2(sale.subtotal)));
+        reportTable->setItem(row, 3, new QTableWidgetItem(money2(sale.tax)));
+        reportTable->setItem(row, 4, new QTableWidgetItem(money2(sale.discount)));
+        reportTable->setItem(row, 5, new QTableWidgetItem(money2(sale.total)));
 
         totalSales += sale.total;
         totalTax += sale.tax;
@@ -169,10 +172,10 @@ void ReportsDialog::generateSalesByDateReport()
 
         QStringList rowData;
         rowData << QString::number(sale.id) << sale.saleDate
-                << QString::number(sale.subtotal, 'f', 2)
-                << QString::number(sale.tax, 'f', 2)
-                << QString::number(sale.discount, 'f', 2)
-                << QString::number(sale.total, 'f', 2);
+                << money2(sale.subtotal)
+                << money2(sale.tax)
+                << money2(sale.discount)
+                << money2(sale.total);
         reportData.append(rowData);
     }
 
@@ -186,7 +189,7 @@ void ReportsDialog::generateSalesByDateReport()
 void ReportsDialog::generateSalesByCategoryReport()
 {
     QVector<Sale> sales = Database::instance().getAllSales();
-    QMap<QString, double> categoryTotals;
+    QMap<QString, Money> categoryTotals;
     QMap<QString, int> categoryCount;
 
     for (const Sale &sale : sales) {
@@ -203,20 +206,20 @@ void ReportsDialog::generateSalesByCategoryReport()
     reportTable->setRowCount(0);
 
     reportData.clear();
-    double grandTotal = 0.0;
+    Money grandTotal;
 
     for (auto it = categoryTotals.begin(); it != categoryTotals.end(); ++it) {
         int row = reportTable->rowCount();
         reportTable->insertRow(row);
 
         reportTable->setItem(row, 0, new QTableWidgetItem(it.key()));
-        reportTable->setItem(row, 1, new QTableWidgetItem(QString::number(it.value(), 'f', 2)));
+        reportTable->setItem(row, 1, new QTableWidgetItem(money2(it.value())));
         reportTable->setItem(row, 2, new QTableWidgetItem(QString::number(categoryCount[it.key()])));
 
         grandTotal += it.value();
 
         QStringList rowData;
-        rowData << it.key() << QString::number(it.value(), 'f', 2) << QString::number(categoryCount[it.key()]);
+        rowData << it.key() << money2(it.value()) << QString::number(categoryCount[it.key()]);
         reportData.append(rowData);
     }
 
@@ -226,7 +229,7 @@ void ReportsDialog::generateSalesByCategoryReport()
 void ReportsDialog::generateSalesByPaymentReport()
 {
     QVector<Sale> sales = Database::instance().getAllSales();
-    QMap<QString, double> paymentTotals;
+    QMap<QString, Money> paymentTotals;
     QMap<QString, int> paymentCount;
 
     for (const Sale &sale : sales) {
@@ -239,20 +242,20 @@ void ReportsDialog::generateSalesByPaymentReport()
     reportTable->setRowCount(0);
 
     reportData.clear();
-    double grandTotal = 0.0;
+    Money grandTotal;
 
     for (auto it = paymentTotals.begin(); it != paymentTotals.end(); ++it) {
         int row = reportTable->rowCount();
         reportTable->insertRow(row);
 
         reportTable->setItem(row, 0, new QTableWidgetItem(it.key()));
-        reportTable->setItem(row, 1, new QTableWidgetItem(QString::number(it.value(), 'f', 2)));
+        reportTable->setItem(row, 1, new QTableWidgetItem(money2(it.value())));
         reportTable->setItem(row, 2, new QTableWidgetItem(QString::number(paymentCount[it.key()])));
 
         grandTotal += it.value();
 
         QStringList rowData;
-        rowData << it.key() << QString::number(it.value(), 'f', 2) << QString::number(paymentCount[it.key()]);
+        rowData << it.key() << money2(it.value()) << QString::number(paymentCount[it.key()]);
         reportData.append(rowData);
     }
 
@@ -293,7 +296,7 @@ void ReportsDialog::generateDailySalesReport()
     QString endDate = endDateEdit->date().toString("yyyy-MM-dd");
 
     QVector<Sale> sales = Database::instance().getSalesByDateRange(startDate, endDate);
-    QMap<QString, double> dailyTotals;
+    QMap<QString, Money> dailyTotals;
     QMap<QString, int> dailyCount;
 
     for (const Sale &sale : sales) {
@@ -307,20 +310,20 @@ void ReportsDialog::generateDailySalesReport()
     reportTable->setRowCount(0);
 
     reportData.clear();
-    double grandTotal = 0.0;
+    Money grandTotal;
 
     for (auto it = dailyTotals.begin(); it != dailyTotals.end(); ++it) {
         int row = reportTable->rowCount();
         reportTable->insertRow(row);
 
         reportTable->setItem(row, 0, new QTableWidgetItem(it.key()));
-        reportTable->setItem(row, 1, new QTableWidgetItem(QString::number(it.value(), 'f', 2)));
+        reportTable->setItem(row, 1, new QTableWidgetItem(money2(it.value())));
         reportTable->setItem(row, 2, new QTableWidgetItem(QString::number(dailyCount[it.key()])));
 
         grandTotal += it.value();
 
         QStringList rowData;
-        rowData << it.key() << QString::number(it.value(), 'f', 2) << QString::number(dailyCount[it.key()]);
+        rowData << it.key() << money2(it.value()) << QString::number(dailyCount[it.key()]);
         reportData.append(rowData);
     }
 

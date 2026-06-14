@@ -25,17 +25,19 @@
 #include <QRadioButton>
 #include <QButtonGroup>
 
+#include "money.h"
+
 class PaymentDialog : public QDialog
 {
     Q_OBJECT
 
 public:
-    explicit PaymentDialog(double totalAmount, QWidget *parent = nullptr);
+    explicit PaymentDialog(Money totalAmount, QWidget *parent = nullptr);
     ~PaymentDialog();
 
     QString getPaymentMethod() const;
-    double getAmountPaid() const;
-    double getChange() const;
+    Money getAmountPaid() const;
+    Money getChange() const;
     QString getReferenceNumber() const;
 
 private slots:

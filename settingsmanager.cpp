@@ -14,6 +14,7 @@
 // =============================================================================
 #include "settingsmanager.h"
 #include "passwordhasher.h"
+#include "secretstore.h"
 #include <QSqlQuery>
 #include <QSqlError>
 #include <QDebug>
@@ -82,8 +83,14 @@ void SettingsManager::load()
     m_settings.smtpPort             = getSetting("smtpPort",      QString::number(m_settings.smtpPort)).toInt();
     m_settings.smtpSecurity         = getSetting("smtpSecurity",  QString::number(m_settings.smtpSecurity)).toInt();
     m_settings.smtpUsername         = getSetting("smtpUsername",  m_settings.smtpUsername);
-    m_settings.smtpPassword         = getSetting("smtpPassword",  m_settings.smtpPassword);
     m_settings.smtpFromEmail        = getSetting("smtpFromEmail", m_settings.smtpFromEmail);
+
+    // The SMTP password is encrypted at rest (DPAPI). Decrypt into memory; if it
+    // was stored as legacy plaintext, re-save it encrypted now (one-time upgrade).
+    const QString rawSmtpPw = getSetting("smtpPassword", m_settings.smtpPassword);
+    m_settings.smtpPassword = SecretStore::decrypt(rawSmtpPw);
+    if (!rawSmtpPw.isEmpty() && !SecretStore::isEncrypted(rawSmtpPw))
+        setSetting("smtpPassword", SecretStore::encrypt(m_settings.smtpPassword));
 
     // Migrate a legacy plaintext PIN (including the factory default) to a hash
     if (!m_settings.discountPin.isEmpty()
@@ -127,7 +134,7 @@ void SettingsManager::save()
     setSetting("smtpPort",              QString::number(m_settings.smtpPort));
     setSetting("smtpSecurity",          QString::number(m_settings.smtpSecurity));
     setSetting("smtpUsername",          m_settings.smtpUsername);
-    setSetting("smtpPassword",          m_settings.smtpPassword);
+    setSetting("smtpPassword",          SecretStore::encrypt(m_settings.smtpPassword));
     setSetting("smtpFromEmail",         m_settings.smtpFromEmail);
 
     emit settingsChanged();

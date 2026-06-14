@@ -67,7 +67,7 @@ QVariant ProductGridModel::data(const QModelIndex &index, int role) const
                    ? QString("Click to add %1 to cart").arg(p.name)
                    : QString("%1 is out of stock").arg(p.name);
     case ProductIdRole:   return p.id;
-    case PriceRole:       return p.price;
+    case PriceRole:       return QVariant::fromValue<qlonglong>(p.price.cents());
     case StockRole:       return p.stockQuantity;
     case BarcodeRole:     return p.barcode;
     case CategoryRole:    return p.category;
@@ -225,7 +225,7 @@ void ProductCardDelegate::paint(QPainter *painter,
     painter->setFont(detailFont);
 
     const QString price =
-        formatMoney(index.data(ProductGridModel::PriceRole).toDouble());
+        formatMoney(Money::fromCents(index.data(ProductGridModel::PriceRole).toLongLong()));
     const QString stockText =
         stock <= 0      ? QStringLiteral("OUT OF STOCK")
         : !severity.isEmpty() ? QString("%1 — %2 left").arg(severity).arg(stock)

@@ -29,23 +29,27 @@
 #include <QVector>
 #include <QPair>
 #include <QDateTime>
+#include <cmath>
+
+#include "money.h"
 
 struct Product
 {
     int id = 0;
     QString name;
     QString category;
-    double price = 0.0;
-    double costPrice = 0.0;
+    Money price;
+    Money costPrice;
     double profitMargin = 0.0;
     int stockQuantity = 0;
     QString barcode;
     bool isActive = true;
     int reorderLevel = 20;   // per-product low-stock threshold (0 = no alerts)
 
-    static double calculateSellingPrice(double costPrice, double profitMargin)
+    static Money calculateSellingPrice(Money costPrice, double profitMargin)
     {
-        return costPrice * (1.0 + profitMargin / 100.0);
+        return Money::fromCents(
+            std::llround(costPrice.cents() * (1.0 + profitMargin / 100.0)));
     }
 };
 
@@ -53,13 +57,13 @@ struct Sale
 {
     int id = 0;
     QString saleDate;
-    double subtotal = 0.0;
-    double tax = 0.0;
-    double discount = 0.0;
-    double total = 0.0;
+    Money subtotal;
+    Money tax;
+    Money discount;
+    Money total;
     QString paymentMethod;
-    double amountPaid = 0.0;
-    double changeDue = 0.0;
+    Money amountPaid;
+    Money changeDue;
 };
 
 struct SaleItem
@@ -69,9 +73,9 @@ struct SaleItem
     int productId = 0;
     QString productName;
     int quantity = 0;
-    double price = 0.0;
-    double costPrice = 0.0;
-    double subtotal = 0.0;
+    Money price;
+    Money costPrice;
+    Money subtotal;
 };
 
 class Database
@@ -92,8 +96,16 @@ public:
 
     static Database& instance();
 
-    bool initialize();
+    // seedSampleData inserts the demo products + default admin on an empty DB.
+    // Tests pass false so they start from a clean, deterministic schema.
+    bool initialize(bool seedSampleData = true);
     bool isOpen() const;
+
+    // Test hook: repoint the singleton at an arbitrary SQLite file (default an
+    // in-memory DB) on a private connection, so unit tests exercise the real
+    // recordSale/processRefund logic without touching the user's AppData file.
+    // Must be called before initialize().
+    void configureForTesting(const QString &dbPath = QStringLiteral(":memory:"));
 
     // Product operations
     QVector<Product> getAllProducts();
@@ -116,17 +128,17 @@ public:
     // Atomically validates stock, inserts the sale + items, and decrements
     // stock. Returns the new sale id, or -1 (see getLastError()).
     int recordSale(const QVector<SaleItem> &items,
-                   double subtotal, double tax, double discount, double total,
+                   Money subtotal, Money tax, Money discount, Money total,
                    const QString &paymentMethod,
-                   double amountPaid, double changeDue);
+                   Money amountPaid, Money changeDue);
     QVector<Sale> getAllSales();
     QVector<Sale> getSalesByDateRange(const QString &startDate, const QString &endDate);
     QVector<SaleItem> getSaleItems(int saleId);
     Sale getSaleById(int saleId);
 
     // Analytics
-    double getTotalSalesToday();
-    double getTotalSalesThisMonth();
+    Money getTotalSalesToday();
+    Money getTotalSalesThisMonth();
     int getTotalTransactionsToday();
     QVector<QPair<QString, int>> getTopSellingProducts(int limit);
 
@@ -157,9 +169,9 @@ public:
     bool executeQuery(const QString &queryStr);
 
     // Profit calculation
-    double getActualGrossProfit(const QString &startDate, const QString &endDate);
-    double getActualGrossProfitToday();
-    double getActualGrossProfitThisMonth();
+    Money getActualGrossProfit(const QString &startDate, const QString &endDate);
+    Money getActualGrossProfitToday();
+    Money getActualGrossProfitThisMonth();
 
 private:
     Database();
@@ -174,6 +186,7 @@ private:
     bool initialized = false;   // guards against repeated initialize() calls
 
     bool createTables();
+    bool migrateMoneyToCents();
     bool ensureColumn(const QString &table, const QString &column,
                       const QString &definition);
     bool insertSampleData();
