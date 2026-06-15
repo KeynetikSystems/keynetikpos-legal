@@ -161,6 +161,14 @@ bool Database::adjustStockWithLog(int productId, int qtyChange,
 bool Database::createTables()
 {
     QStringList queries;
+    // Schema metadata (key/value) — tracks one-time migrations like the
+    // money-to-cents conversion. A normal table persists reliably across reopen.
+    queries << R"(
+        CREATE TABLE IF NOT EXISTS schema_meta (
+            key   TEXT PRIMARY KEY,
+            value TEXT NOT NULL
+        )
+    )";
     // Categories table
     queries << R"(
         CREATE TABLE IF NOT EXISTS categories (
@@ -306,21 +314,23 @@ bool Database::createTables()
 }
 
 // One-time conversion of money columns from REAL major units (e.g. 19.99) to
-// INTEGER minor units (1999). Keyed on PRAGMA user_version so it runs exactly
-// once per database. A freshly-created DB has no rows yet (sample data is seeded
-// afterwards), so the UPDATEs are harmless no-ops there; only a pre-existing
-// (legacy) database actually has values to scale. Runs in a transaction and
-// only bumps the version on success, so a failure is safely retried next launch.
+// INTEGER minor units (1999). Idempotency is tracked by a marker row in
+// schema_meta (a normal table write, which persists reliably across reopen —
+// unlike a PRAGMA user_version header write under WAL via the Qt driver, which
+// did not). The marker is written in the SAME transaction as the UPDATEs, so
+// the data scaling and the "done" flag commit atomically and the migration can
+// never run twice (which would re-scale every amount by 100). A freshly-created
+// DB has no rows yet (sample data is seeded afterwards), so the UPDATEs are
+// harmless no-ops there; only a pre-existing (legacy) database has values to
+// scale.
 bool Database::migrateMoneyToCents()
 {
-    int userVersion = 0;
     {
-        QSqlQuery ver(db);
-        if (ver.exec("PRAGMA user_version") && ver.next())
-            userVersion = ver.value(0).toInt();
+        QSqlQuery done(db);
+        done.prepare("SELECT value FROM schema_meta WHERE key = 'money_in_cents'");
+        if (done.exec() && done.next())
+            return true;   // already migrated
     }
-    if (userVersion >= 1)
-        return true;
 
     static const char *const updates[] = {
         "UPDATE products SET price=CAST(ROUND(price*100) AS INTEGER), "
@@ -347,8 +357,9 @@ bool Database::migrateMoneyToCents()
             return false;
         }
     }
-    QSqlQuery setv(db);
-    setv.exec("PRAGMA user_version = 1");
+    QSqlQuery mark(db);
+    mark.exec("INSERT OR REPLACE INTO schema_meta (key, value) "
+              "VALUES ('money_in_cents', '1')");
     return db.commit();
 }
 

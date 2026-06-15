@@ -14,6 +14,7 @@
 //       untested because Database was a hard singleton bound to AppData.
 // =============================================================================
 #include <QtTest>
+#include <QTemporaryDir>
 
 #include "database.h"
 
@@ -141,6 +142,29 @@ private slots:
     void processRefund_unknownSaleFails()
     {
         QVERIFY(!dbi().processRefund(99999, "n/a", "tester"));
+    }
+
+    // The cents migration must run exactly once: PRAGMA user_version has to
+    // persist so a reopen does NOT re-scale money (which would both slow every
+    // launch and multiply every price by 100). Uses a real file DB so state
+    // survives the close/reopen the way a second process launch would.
+    void moneyMigration_persistsAcrossReopen()
+    {
+        QTemporaryDir tmp;
+        QVERIFY(tmp.isValid());
+        const QString path = tmp.filePath("persist.db");
+
+        dbi().configureForTesting(path);
+        QVERIFY(dbi().initialize(/*seedSampleData=*/false));
+        QVERIFY(dbi().executeQuery(
+            "INSERT OR IGNORE INTO categories (name) VALUES ('Test')"));
+        const int pid = addProduct("PERSIST1", m(12300), 5);
+        QCOMPARE(dbi().getProductByBarcode("PERSIST1").price.cents(), 12300);
+
+        // Reopen the same file, as a fresh launch would.
+        dbi().configureForTesting(path);
+        QVERIFY(dbi().initialize(/*seedSampleData=*/false));
+        QCOMPARE(dbi().getProductById(pid).price.cents(), 12300);  // NOT *100
     }
 };
 
