@@ -12,6 +12,7 @@
 //    quantity, syncs the cache, and emits the level-warning signals.
 // =============================================================================
 #include "inventorymanager.h"
+#include "colorscheme.h"
 #include <QSqlQuery>
 #include <QSqlError>
 #include <QDebug>
@@ -172,17 +173,21 @@ bool InventoryManager::setReorderLevel(int productId, int level)
 
 QString InventoryManager::getStatusColor(InventoryStatus status) const
 {
+    // Pulled from the active theme's dedicated stock-health colours (not the
+    // warning/error semantic colours) so status pills stay legible across
+    // every theme and don't collide visually with danger/warning buttons.
+    const ColorScheme &scheme = getColorScheme();
     switch (status) {
     case InventoryStatus::Healthy:
-        return "#27AE60"; // Green
+        return scheme.statusHealthy;
     case InventoryStatus::Low:
-        return "#F39C12"; // Orange
+        return scheme.statusLow;
     case InventoryStatus::Critical:
-        return "#E74C3C"; // Red
+        return scheme.statusCritical;
     case InventoryStatus::OutOfStock:
-        return "#95A5A6"; // Gray
+        return scheme.statusOutOfStock;
     default:
-        return "#3498DB"; // Blue
+        return scheme.info;
     }
 }
 

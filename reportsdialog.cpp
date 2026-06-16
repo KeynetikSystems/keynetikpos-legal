@@ -10,6 +10,7 @@
 // =============================================================================
 #include "reportsdialog.h"
 #include "money.h"         // Money, formatMoney()
+#include "colorscheme.h"
 #include <QVBoxLayout>
 #include <QHBoxLayout>
 #include <QGroupBox>
@@ -375,11 +376,17 @@ void ReportsDialog::onExportToPDF()
     printer.setOutputFileName(fileName);
     printer.setPageOrientation(QPageLayout::Portrait);
 
+    // PDFs are printed documents, not on-screen UI, so the page background
+    // and body text stay white/black for print-friendliness regardless of
+    // the app's theme (a Dark-theme textPrimary would be near-invisible on
+    // white paper) — but the header accent is pulled from the active theme
+    // so the export still feels branded/consistent with the on-screen UI.
+    const ColorScheme &scheme = getColorScheme();
     QString html = "<html><head><style>"
                    "table { border-collapse: collapse; width: 100%; }"
                    "th, td { border: 1px solid black; padding: 8px; text-align: left; }"
-                   "th { background-color: #4CAF50; color: white; }"
-                   "h2 { color: #333; }"
+                   "th { background-color: " + scheme.accentPrimary + "; color: white; }"
+                   "h2 { color: #333333; }"
                    "</style></head><body>";
 
     html += "<h2>" + currentReportType + "</h2>";

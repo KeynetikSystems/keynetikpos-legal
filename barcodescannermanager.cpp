@@ -33,6 +33,7 @@
 #include <QRandomGenerator>
 #include <qgroupbox.h>
 #include "appstyle.h"
+#include "colorscheme.h"
 
 // =============================================================================
 // BarcodeScannerManager Implementation
@@ -372,7 +373,14 @@ void BarcodeGeneratorDialog::setupUi()
     m_barcodeDisplay = new QLabel(this);
     m_barcodeDisplay->setAlignment(Qt::AlignCenter);
     m_barcodeDisplay->setMinimumHeight(100);
-    m_barcodeDisplay->setStyleSheet("border: 1px solid #ccc; background: white;");
+    {
+        // Theme-aware instead of a hardcoded white background, which used to
+        // turn into a glowing white box in Dark/Silver themes.
+        const ColorScheme &scheme = getColorScheme();
+        m_barcodeDisplay->setStyleSheet(
+            QString("border: 1px solid %1; background: %2; color: %3;")
+                .arg(scheme.borderColor, scheme.inputBg, scheme.textPrimary));
+    }
     displayLayout->addWidget(m_barcodeDisplay);
 
     layout->addWidget(displayGroup);

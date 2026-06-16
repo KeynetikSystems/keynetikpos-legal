@@ -1795,9 +1795,11 @@ void MainWindow::showToast(const QString &message, const QString &type)
             (type == "error")   ? scheme.error :
             (type == "warning") ? scheme.warning : scheme.accentSecondary;
 
+    // pt (not px) to match the rest of the app's stylesheet units, so the
+    // toast scales consistently with body text on HiDPI displays.
     toast->setStyleSheet(
         QString("QLabel { background-color: %1; color: white; padding: 14px 28px; "
-                "border-radius: 8px; font-size: 14px; font-weight: 600; }")
+                "border-radius: 8px; font-size: 12pt; font-weight: 600; }")
             .arg(bgColor));
 
     toast->adjustSize();

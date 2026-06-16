@@ -66,6 +66,15 @@ struct ColorScheme {
     QString activeColor;
     QString disabledBg;       // also read-only table cells
     QString disabledText;
+
+    // Inventory stock-health colours (kept distinct from the warning/error
+    // semantic pair above so "this product is low on stock" never reads as
+    // "this button is dangerous"). statusHealthy/Low/Critical lean teal/amber/
+    // maroon rather than the action green/orange/red used elsewhere.
+    QString statusHealthy;
+    QString statusLow;
+    QString statusCritical;
+    QString statusOutOfStock;
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -175,6 +184,11 @@ inline ColorScheme getLightColorScheme()
     s.activeColor      = "#d8d8d8";
     s.disabledBg       = "#f0f0f0";
     s.disabledText     = "#a0a0a0";
+
+    s.statusHealthy    = "#16a085";   // teal — distinct from accentPrimary green
+    s.statusLow         = "#d68910";  // amber — distinct from `warning` orange
+    s.statusCritical    = "#922b21";  // maroon — distinct from `error` red
+    s.statusOutOfStock  = "#95a5a6";  // neutral grey
     return s;
 }
 
@@ -210,6 +224,11 @@ inline ColorScheme getDarkColorScheme()
     s.activeColor      = "#2f2f2f";
     s.disabledBg       = "#333333";
     s.disabledText     = "#777777";
+
+    s.statusHealthy    = "#1abc9c";   // bright teal, readable on dark bg
+    s.statusLow         = "#e0a020";
+    s.statusCritical    = "#c0392b";
+    s.statusOutOfStock  = "#6b6f76";
     return s;
 }
 
@@ -231,9 +250,13 @@ inline ColorScheme getClassicColorScheme()
     s.inputFocusBorder = "#0078d7";   // Windows selection blue
 
     s.accentPrimary    = "#27ae60";
-    s.accentSecondary  = "#0078d7";
+    // Darkened from the raw Windows selection blue (#0078d7), which only
+    // hit ~4.5:1 contrast with white button text — right at the WCAG AA
+    // edge. #005a9e gives a comfortable margin (~7:1) while still reading
+    // as "Windows blue".
+    s.accentSecondary  = "#005a9e";
     s.accentTertiary   = "#8e44ad";
-    s.info             = "#0078d7";
+    s.info             = "#005a9e";
     s.success          = "#1e7d34";
     s.warning          = "#b8860b";
     s.error            = "#c0392b";
@@ -249,6 +272,11 @@ inline ColorScheme getClassicColorScheme()
     s.activeColor      = "#cce4f7";
     s.disabledBg       = "#f0f0f0";
     s.disabledText     = "#6d6d6d";
+
+    s.statusHealthy    = "#138a72";
+    s.statusLow         = "#b8730e";
+    s.statusCritical    = "#8b2a20";
+    s.statusOutOfStock  = "#888888";
     return s;
 }
 
@@ -286,6 +314,11 @@ inline ColorScheme getSilverColorScheme()
     s.activeColor      = "#b9c0ca";
     s.disabledBg       = "#d3d7dd";
     s.disabledText     = "#8b9099";
+
+    s.statusHealthy    = "#2f8a72";
+    s.statusLow         = "#ab7b2e";
+    s.statusCritical    = "#9a4338";
+    s.statusOutOfStock  = "#9aa1ab";
     return s;
 }
 

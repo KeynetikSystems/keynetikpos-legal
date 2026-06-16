@@ -16,6 +16,7 @@
 
 #include <QPainter>
 #include <QFontMetrics>
+#include <QListView>
 
 // ─────────────────────────────────────────────────────────────────────────────
 // ProductGridModel
@@ -143,9 +144,25 @@ QSize ProductCardDelegate::sizeHint(const QStyleOptionViewItem &option,
     // Scale the card with the active font/DPI instead of a fixed pixel size so
     // the grid stays legible on small cashier displays and crisp on hi-DPI.
     const QFontMetrics fm(option.font);
-    const int w = qMax(170, fm.averageCharWidth() * 24);
-    const int h = qMax(96,  fm.height() * 5);
-    return QSize(w, h);
+    const int minW = qMax(170, fm.averageCharWidth() * 24);
+    const int h    = qMax(96,  fm.height() * 5);
+
+    // Stretch the card width so a full row of cards exactly fills the
+    // viewport — otherwise QListView's IconMode grid wraps at a fixed card
+    // width and leaves a dead gap on the right whenever the viewport width
+    // isn't an exact multiple of (card + spacing).
+    const auto *view = qobject_cast<const QListView *>(option.widget);
+    if (!view)
+        return QSize(minW, h);
+
+    const int spacing = qMax(0, view->spacing());
+    const int vw = view->viewport()->width();
+    if (vw <= minW + 2 * spacing)
+        return QSize(minW, h);
+
+    const int columns = qMax(1, (vw - spacing) / (minW + spacing));
+    const int w = (vw - spacing * (columns + 1)) / columns;
+    return QSize(qMax(w, minW), h);
 }
 
 void ProductCardDelegate::paint(QPainter *painter,
@@ -165,20 +182,24 @@ void ProductCardDelegate::paint(QPainter *painter,
     // readable for colour-blind cashiers (and screen readers via the tooltip).
     QColor bg;
     QString severity;
+    // Stock-health colours come from the dedicated status* fields, not the
+    // warning/error/accentPrimary semantic colours — otherwise a low-stock
+    // card and a "danger" action button look identical, which reads as the
+    // grid itself being in some error state.
     switch (InventoryManager::calculateStatus(stock, reorder)) {
     case InventoryStatus::OutOfStock:
         bg = QColor(scheme.disabledBg);
         break;
     case InventoryStatus::Critical:
-        bg = QColor(scheme.error);
+        bg = QColor(scheme.statusCritical);
         severity = QStringLiteral("CRITICAL");
         break;
     case InventoryStatus::Low:
-        bg = QColor(scheme.warning);
+        bg = QColor(scheme.statusLow);
         severity = QStringLiteral("LOW");
         break;
     case InventoryStatus::Healthy:
-        bg = QColor(scheme.accentPrimary);
+        bg = QColor(scheme.statusHealthy);
         break;
     }
 
@@ -190,7 +211,14 @@ void ProductCardDelegate::paint(QPainter *painter,
     } else {
         const double lum = 0.299 * bg.red() + 0.587 * bg.green()
                            + 0.114 * bg.blue();
-        fg = lum > 150 ? QColor("#1a1a1a") : QColor(Qt::white);
+        // NOTE: intentionally NOT scheme.textPrimary here — this is a
+        // contrast decision against the status chip's own background
+        // luminance, not the theme's body-text colour. In Dark theme,
+        // textPrimary (#e0e0e0) is itself near-white and would defeat the
+        // luminance check on a light status colour (e.g. statusLow). A
+        // fixed near-black/white pair is what the contrast formula actually
+        // needs.
+        fg = lum > 150 ? QColor(0x1a, 0x1a, 0x1a) : QColor(Qt::white);
     }
 
     if (stock > 0 && (option.state & (QStyle::State_MouseOver |
