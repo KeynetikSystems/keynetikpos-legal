@@ -1,5 +1,5 @@
 ﻿// =============================================================================
-// settingsdialog.h â€” SettingsDialog: tabbed editor for all configuration
+// settingsdialog.h — SettingsDialog: tabbed editor for all configuration
 // -----------------------------------------------------------------------------
 // WHAT: Tabs for Business, Tax, Receipt, Security (discount PIN + require-PIN
 //       toggle), and Messaging (Twilio WhatsApp SID/token/number and Africa's

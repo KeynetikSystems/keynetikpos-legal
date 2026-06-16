@@ -112,7 +112,10 @@ target_include_directories(KeynetikPOS PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 # block builds before they can be cleaned up incrementally.
 # ============================================================
 if(MSVC)
-    set(KEYNETIK_WARNINGS /W4)
+    # /utf-8: the sources are UTF-8 (no BOM); without this MSVC reads string
+    # literals in the system code page and mangles emoji/accents into mojibake.
+    # (MinGW/GCC already defaults to a UTF-8 input/exec charset.)
+    set(KEYNETIK_WARNINGS /W4 /utf-8)
 else()
     set(KEYNETIK_WARNINGS -Wall -Wextra)
 endif()

@@ -1,5 +1,5 @@
 ﻿// =============================================================================
-// settingsdialog.cpp â€” Implementation of SettingsDialog (see settingsdialog.h
+// settingsdialog.cpp — Implementation of SettingsDialog (see settingsdialog.h
 // for the full WHAT/HOW/WHY).
 // -----------------------------------------------------------------------------
 // Implementation notes:
@@ -7,7 +7,7 @@
 //    writes the whole BusinessSettings back, hashing a newly entered discount
 //    PIN (entered twice) via SettingsManager::setDiscountPin().
 //  - Messaging credentials (Twilio / Africa's Talking) are stored and then
-//    pushed live through reloadMessagingProviders() â€” no restart
+//    pushed live through reloadMessagingProviders() — no restart
 //    required; testWhatsAppConnection() exercises the configured provider.
 // =============================================================================
 #include "settingsdialog.h"
@@ -44,7 +44,7 @@ static QString sectionStyle()
 SettingsDialog::SettingsDialog(SettingsManager *settings, QWidget *parent)
     : QDialog(parent), m_settings(settings)
 {
-    setWindowTitle("âš™ Settings");
+    setWindowTitle("⚙ Settings");
     setMinimumSize(540, 600);
     setupUi();
     loadCurrentValues();
@@ -56,8 +56,8 @@ void SettingsDialog::setupUi()
     mainLayout->setSpacing(10);
     mainLayout->setContentsMargins(15, 15, 15, 15);
 
-    // â”€â”€ Header â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-    auto *header = new QLabel("âš™  Business Settings", this);
+    // ── Header ────────────────────────────────────────────
+    auto *header = new QLabel("⚙  Business Settings", this);
     header->setProperty("role", "sectionTitle");
     header->setStyleSheet("padding: 6px 0;");
     mainLayout->addWidget(header);
@@ -67,18 +67,18 @@ void SettingsDialog::setupUi()
     line->setProperty("role", "hline");
     mainLayout->addWidget(line);
 
-    // â”€â”€ Tabs â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    // ── Tabs ──────────────────────────────────────────────
     auto *tabs = new QTabWidget(this);
 
-    tabs->addTab(buildBusinessTab(),  "ðŸ¢  Business");
-    tabs->addTab(buildTaxTab(),       "ðŸ’²  Tax");
-    tabs->addTab(buildReceiptTab(),   "ðŸ§¾  Receipt");
-    tabs->addTab(buildMessagingTab(), "ðŸ“±  Messaging");  // â† NEW TAB
-    tabs->addTab(buildSecurityTab(),  "ðŸ”’  Security");
+    tabs->addTab(buildBusinessTab(),  "🏢  Business");
+    tabs->addTab(buildTaxTab(),       "💲  Tax");
+    tabs->addTab(buildReceiptTab(),   "🧾  Receipt");
+    tabs->addTab(buildMessagingTab(), "📱  Messaging");  // ← NEW TAB
+    tabs->addTab(buildSecurityTab(),  "🔒  Security");
 
     mainLayout->addWidget(tabs, 1);
 
-    // â”€â”€ Buttons â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    // ── Buttons ───────────────────────────────────────────
     auto *btnLine = new QFrame(this);
     btnLine->setFrameShape(QFrame::HLine);
     btnLine->setProperty("role", "hline");
@@ -86,7 +86,7 @@ void SettingsDialog::setupUi()
 
     auto *btnLayout = new QHBoxLayout();
 
-    auto *resetBtn = new QPushButton("â†º Reset Defaults", this);
+    auto *resetBtn = new QPushButton("↺ Reset Defaults", this);
     connect(resetBtn, &QPushButton::clicked, this, &SettingsDialog::resetToDefaults);
     btnLayout->addWidget(resetBtn);
 
@@ -96,7 +96,7 @@ void SettingsDialog::setupUi()
     connect(cancelBtn, &QPushButton::clicked, this, &QDialog::reject);
     btnLayout->addWidget(cancelBtn);
 
-    auto *saveBtn = new QPushButton("âœ”  Save Settings", this);
+    auto *saveBtn = new QPushButton("✔  Save Settings", this);
     saveBtn->setDefault(true);
     saveBtn->setProperty("kind", "info");
     connect(saveBtn, &QPushButton::clicked, this, &SettingsDialog::save);
@@ -111,7 +111,7 @@ QWidget *SettingsDialog::buildBusinessTab()
     auto *layout = new QVBoxLayout(w);
     layout->setSpacing(12);
 
-    // â”€â”€ Identity â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    // ── Identity ──────────────────────────────────────────
     auto *idGroup = new QGroupBox("Business Identity");
     idGroup->setStyleSheet(sectionStyle());
     auto *form = new QFormLayout(idGroup);
@@ -119,7 +119,7 @@ QWidget *SettingsDialog::buildBusinessTab()
     form->setLabelAlignment(Qt::AlignRight | Qt::AlignVCenter);
 
     m_businessName = new QLineEdit(idGroup);
-    m_businessName->setPlaceholderText("e.g. The Corner CafÃ©");
+    m_businessName->setPlaceholderText("e.g. The Corner Café");
     form->addRow("Business Name:", m_businessName);
 
     m_address = new QLineEdit(idGroup);
@@ -140,7 +140,7 @@ QWidget *SettingsDialog::buildBusinessTab()
 
     layout->addWidget(idGroup);
 
-    // â”€â”€ Currency â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    // ── Currency ──────────────────────────────────────────
     auto *curGroup = new QGroupBox("Currency");
     curGroup->setStyleSheet(sectionStyle());
     auto *curForm = new QFormLayout(curGroup);
@@ -199,7 +199,7 @@ QWidget *SettingsDialog::buildTaxTab()
     // Info label
     auto *info = new QLabel(
         "<i style='color:#555;'>Tax-exclusive: tax is added on top of the displayed price.<br>"
-        "Tax-inclusive: displayed prices already contain tax â€” tax is extracted for reporting.</i>",
+        "Tax-inclusive: displayed prices already contain tax — tax is extracted for reporting.</i>",
         group);
     info->setWordWrap(true);
     form->addRow("", info);
@@ -303,8 +303,8 @@ QWidget *SettingsDialog::buildMessagingTab()
     auto *layout = new QVBoxLayout(w);
     layout->setSpacing(12);
 
-    // â”€â”€ WhatsApp / Twilio â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-    auto *whatsappGroup = new QGroupBox("ðŸ“± WhatsApp (Twilio)");
+    // ── WhatsApp / Twilio ────────────────────────────────────────
+    auto *whatsappGroup = new QGroupBox("📱 WhatsApp (Twilio)");
     whatsappGroup->setStyleSheet(sectionStyle());
     auto *form = new QFormLayout(whatsappGroup);
     form->setLabelAlignment(Qt::AlignRight | Qt::AlignVCenter);
@@ -326,12 +326,12 @@ QWidget *SettingsDialog::buildMessagingTab()
     m_whatsappAuthToken->setPlaceholderText("Your Twilio Auth Token");
     form->addRow("Auth Token:", m_whatsappAuthToken);
 
-    auto *showTokenBtn = new QPushButton("ðŸ‘ Show", whatsappGroup);
+    auto *showTokenBtn = new QPushButton("👁 Show", whatsappGroup);
     showTokenBtn->setFixedWidth(80);
     showTokenBtn->setCheckable(true);
     connect(showTokenBtn, &QPushButton::toggled, this, [this, showTokenBtn](bool checked) {
         m_whatsappAuthToken->setEchoMode(checked ? QLineEdit::Normal : QLineEdit::Password);
-        showTokenBtn->setText(checked ? "ðŸ™ˆ Hide" : "ðŸ‘ Show");
+        showTokenBtn->setText(checked ? "🙈 Hide" : "👁 Show");
     });
     form->addRow("", showTokenBtn);
 
@@ -350,8 +350,8 @@ QWidget *SettingsDialog::buildMessagingTab()
 
     layout->addWidget(whatsappGroup);
 
-    // â”€â”€ Africa's Talking SMS â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-    auto *atGroup = new QGroupBox("ðŸ“¡ Africa's Talking SMS");
+    // ── Africa's Talking SMS ─────────────────────────────────────
+    auto *atGroup = new QGroupBox("📡 Africa's Talking SMS");
     atGroup->setStyleSheet(sectionStyle());
     auto *atForm = new QFormLayout(atGroup);
     atForm->setLabelAlignment(Qt::AlignRight | Qt::AlignVCenter);
@@ -360,7 +360,7 @@ QWidget *SettingsDialog::buildMessagingTab()
     auto *atInfo = new QLabel(
         "<b>Ideal for Kenyan businesses</b><br>"
         "<i style='color:#555;'>Sign up at <a href='https://africastalking.com'>africastalking.com</a>"
-        " Â· ~KES 0.80/SMS Â· No monthly fees</i>");
+        " · ~KES 0.80/SMS · No monthly fees</i>");
     atInfo->setOpenExternalLinks(true);
     atInfo->setWordWrap(true);
     atForm->addRow("", atInfo);
@@ -379,12 +379,12 @@ QWidget *SettingsDialog::buildMessagingTab()
 
     layout->addWidget(atGroup);
 
-    // â”€â”€ Test Connection â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-    auto *testGroup = new QGroupBox("ðŸ§ª Test Configuration");
+    // ── Test Connection ───────────────────────────────────────────
+    auto *testGroup = new QGroupBox("🧪 Test Configuration");
     testGroup->setStyleSheet(sectionStyle());
     auto *testLayout = new QVBoxLayout(testGroup);
 
-    auto *testBtn = new QPushButton("ðŸ“¤ Send Test WhatsApp Message", testGroup);
+    auto *testBtn = new QPushButton("📤 Send Test WhatsApp Message", testGroup);
     testBtn->setStyleSheet("background:#25D366;color:white;padding:8px 15px;font-weight:bold;");
     connect(testBtn, &QPushButton::clicked, this, &SettingsDialog::testWhatsAppConnection);
     testLayout->addWidget(testBtn);
@@ -443,7 +443,7 @@ QWidget *SettingsDialog::buildSecurityTab()
     auto *sLayout = new QVBoxLayout(shiftGroup);
     sLayout->addWidget(new QLabel(
         "<i style='color:#555;'>Shift management is available from the main toolbar.<br>"
-        "Use the ðŸ• Shift button to open or close the current shift.</i>"));
+        "Use the 🕐 Shift button to open or close the current shift.</i>"));
     layout->addWidget(shiftGroup);
 
     layout->addStretch();
