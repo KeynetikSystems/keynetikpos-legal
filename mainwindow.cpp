@@ -233,6 +233,18 @@ void MainWindow::runDeferredStartup()
 {
     // Messaging providers + scheduler loop (may touch settings/network).
     reloadMessagingProviders(scheduleManager, this);
+
+    // Surface scheduled-message outcomes (delivery is confirmed asynchronously
+    // from the provider, not assumed on dispatch).
+    connect(scheduleManager, &ScheduleManager::messageError, this,
+            [this](int, const QString &error) {
+        showToast("Scheduled message failed: " + error, "error");
+    });
+    connect(scheduleManager, &ScheduleManager::messageDelivered, this,
+            [this](int, const QString &) {
+        if (statusLabel) statusLabel->setText("Scheduled report sent");
+    });
+
     scheduleManager->start();
 
     // Inventory polling.

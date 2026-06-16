@@ -69,10 +69,9 @@ public:
                      const QString &reportTitle,
                      const QString &reportContent);
 
-signals:
-    void messageSent(bool success, const QString &messageId);
-    void errorOccurred(const QString &error);
-    void statusChanged(const QString &status);
+    // messageSent(bool, messageId, recipient) / errorOccurred / statusChanged
+    // are inherited from MessageProvider — do NOT redeclare them here, or the
+    // base-class signal gets shadowed and uniform connects miss this provider.
 
 private slots:
     void onReplyFinished(QNetworkReply *reply);

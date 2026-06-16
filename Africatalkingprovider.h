@@ -109,7 +109,9 @@ public:
         qDebug() << "  To:" << formattedRecipient;
         qDebug() << "  Message length:" << message.length();
 
-        m_network->post(request, postData.toString(QUrl::FullyEncoded).toUtf8());
+        QNetworkReply *reply =
+            m_network->post(request, postData.toString(QUrl::FullyEncoded).toUtf8());
+        reply->setProperty("recipient", recipient);   // original, for correlation
 
         return true;
     }
@@ -132,6 +134,7 @@ public:
 private slots:
     void onReplyFinished(QNetworkReply *reply)
     {
+        const QString origRecipient = reply->property("recipient").toString();
         if (reply->error() == QNetworkReply::NoError) {
             QByteArray response = reply->readAll();
             QJsonDocument doc = QJsonDocument::fromJson(response);
@@ -164,7 +167,7 @@ private slots:
                     if (status == "Success" || statusCode == 101) {
                         emit statusChanged(QString("SMS sent! Cost: %1")
                                                .arg(recipient["cost"].toString()));
-                        emit messageSent(true, messageId, recipient["number"].toString());
+                        emit messageSent(true, messageId, origRecipient);
 
                         qDebug() << "✅ SMS sent successfully";
                         qDebug() << "   Message ID:" << messageId;
@@ -173,22 +176,22 @@ private slots:
                         QString error = QString("SMS failed: %1 (Code: %2)")
                         .arg(status).arg(statusCode);
                         emit errorOccurred(error);
-                        emit messageSent(false, "", recipient["number"].toString());
+                        emit messageSent(false, "", origRecipient);
 
                         qWarning() << "❌ SMS failed:" << status;
                     }
                 } else {
                     emit errorOccurred("No recipients in response");
-                    emit messageSent(false, "", "");
+                    emit messageSent(false, "", origRecipient);
                 }
             } else {
                 emit errorOccurred("Invalid response format");
-                emit messageSent(false, "", "");
+                emit messageSent(false, "", origRecipient);
             }
         } else {
             QString error = QString("Network error: %1").arg(reply->errorString());
             emit errorOccurred(error);
-            emit messageSent(false, "", "");
+            emit messageSent(false, "", origRecipient);
 
             qWarning() << "❌ Network error:" << reply->errorString();
         }

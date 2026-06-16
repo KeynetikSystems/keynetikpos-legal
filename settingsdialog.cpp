@@ -12,6 +12,8 @@
 // =============================================================================
 #include "settingsdialog.h"
 #include "settingsmanager.h"
+#include "secretstore.h"
+#include "whatsappmanager.h"
 
 #include <QVBoxLayout>
 #include <QHBoxLayout>
@@ -483,11 +485,11 @@ void SettingsDialog::loadCurrentValues()
     // Load WhatsApp settings
     QSettings settings("KeynetikPOS", "KeynetikPOS");
     m_whatsappAccountSid->setText(settings.value("twilio/sid", "").toString());
-    m_whatsappAuthToken->setText(settings.value("twilio/token", "").toString());
+    m_whatsappAuthToken->setText(SecretStore::decrypt(settings.value("twilio/token", "").toString()));
     m_whatsappFromNumber->setText(settings.value("twilio/number", "").toString());
 
     // Load Africa's Talking settings
-    if (m_atApiKey)   m_atApiKey->setText(settings.value("africastalking/key", "").toString());
+    if (m_atApiKey)   m_atApiKey->setText(SecretStore::decrypt(settings.value("africastalking/key", "").toString()));
     if (m_atUsername) m_atUsername->setText(settings.value("africastalking/username", "").toString());
     if (m_atSenderId) m_atSenderId->setText(settings.value("africastalking/senderid", "").toString());
 
@@ -523,17 +525,34 @@ void SettingsDialog::testWhatsAppConnection()
         return;
     }
 
-    // Save temporarily and test
-    QSettings settings("KeynetikPOS", "KeynetikPOS");
-    settings.setValue("twilio/sid",    accountSid);
-    settings.setValue("twilio/token",  authToken);
-    settings.setValue("twilio/number", fromNumber);
+    // Send a real test message through a transient provider built from the
+    // values currently in the fields (no persisting — Save does that), and
+    // report the ACTUAL async result from Twilio rather than a vague "queued".
+    auto *wa = new WhatsAppManager(this);
+    wa->setTwilioAccountSid(accountSid);
+    wa->setTwilioAuthToken(authToken);
+    wa->setTwilioWhatsAppNumber(fromNumber);
 
-    QMessageBox::information(this, "Test Sent",
-                             "Test message queued!\n\n"
-                             "If configured correctly, you should receive a WhatsApp message shortly.\n\n"
-                             "Note: For sandbox testing, make sure you've sent 'join <sandbox-name>' "
-                             "to the Twilio sandbox number first.");
+    connect(wa, &MessageProvider::messageSent, this,
+            [this, wa](bool ok, const QString &id, const QString &to) {
+        if (ok)
+            QMessageBox::information(this, "Test Sent",
+                QString("Twilio accepted the message for %1.\nMessage ID: %2\n\n"
+                        "If it doesn't arrive, make sure the recipient has joined "
+                        "the Twilio sandbox.").arg(to, id));
+        else
+            QMessageBox::warning(this, "Test Failed",
+                "Twilio rejected the test message. Check the Account SID, Auth "
+                "Token and WhatsApp number, and that the recipient has joined the "
+                "sandbox (send 'join <sandbox-name>' to the sandbox number first).");
+        wa->deleteLater();
+    });
+
+    if (!wa->sendMessage(testNumber.trimmed(), "KeynetikPOS test message.")) {
+        QMessageBox::warning(this, "Test Failed",
+                             "Could not start the test send. Check the configuration.");
+        wa->deleteLater();
+    }
 }
 
 void SettingsDialog::save()
@@ -600,12 +619,12 @@ void SettingsDialog::save()
     // Save WhatsApp / Twilio settings
     QSettings settings("KeynetikPOS", "KeynetikPOS");
     settings.setValue("twilio/sid",    m_whatsappAccountSid->text().trimmed());
-    settings.setValue("twilio/token",  m_whatsappAuthToken->text().trimmed());
+    settings.setValue("twilio/token",  SecretStore::encrypt(m_whatsappAuthToken->text().trimmed()));
     settings.setValue("twilio/number", m_whatsappFromNumber->text().trimmed());
 
     // Persist Africa's Talking credentials if they were entered
     if (m_atApiKey && !m_atApiKey->text().trimmed().isEmpty())
-        settings.setValue("africastalking/key",      m_atApiKey->text().trimmed());
+        settings.setValue("africastalking/key",      SecretStore::encrypt(m_atApiKey->text().trimmed()));
     if (m_atUsername && !m_atUsername->text().trimmed().isEmpty())
         settings.setValue("africastalking/username", m_atUsername->text().trimmed());
     if (m_atSenderId)

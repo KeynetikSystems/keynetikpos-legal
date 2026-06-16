@@ -12,6 +12,7 @@
 #include "schedulemanager.h"
 #include "whatsappmanager.h"
 #include "Africatalkingprovider.h"
+#include "secretstore.h"
 
 #include <QSettings>
 
@@ -27,7 +28,7 @@ void reloadMessagingProviders(ScheduleManager *scheduleManager,
         auto *wa = qobject_cast<WhatsAppManager *>(existingWA);
         if (wa) {
             wa->setTwilioAccountSid(cfg.value("twilio/sid").toString());
-            wa->setTwilioAuthToken(cfg.value("twilio/token").toString());
+            wa->setTwilioAuthToken(SecretStore::decrypt(cfg.value("twilio/token").toString()));
             wa->setTwilioWhatsAppNumber(cfg.value("twilio/number").toString());
         }
     } else {
@@ -44,7 +45,7 @@ void reloadMessagingProviders(ScheduleManager *scheduleManager,
     if (existingAT) {
         auto *at = qobject_cast<AfricasTalkingProvider *>(existingAT);
         if (at) {
-            at->setApiKey(cfg.value("africastalking/key").toString());
+            at->setApiKey(SecretStore::decrypt(cfg.value("africastalking/key").toString()));
             at->setUsername(cfg.value("africastalking/username").toString());
             at->setSenderId(cfg.value("africastalking/senderid").toString());
         }

@@ -84,17 +84,23 @@ bool WhatsAppManager::validateConfiguration() const
 
 QString WhatsAppManager::formatPhoneNumber(const QString &phone) const
 {
-    // Remove any non-numeric characters except +
+    // Normalize to E.164. Default country is Kenya (+254), the target market.
     QString cleaned = phone;
     cleaned.remove(QRegularExpression("[^0-9+]"));
 
-    // Ensure it starts with +
-    if (!cleaned.startsWith("+")) {
-        cleaned = "+" + cleaned;
+    QString e164;
+    if (cleaned.startsWith("+")) {
+        e164 = cleaned;                                   // already international
+    } else if (cleaned.startsWith("254")) {
+        e164 = "+" + cleaned;                             // 2547... -> +2547...
+    } else if (cleaned.startsWith("0")) {
+        e164 = "+254" + cleaned.mid(1);                   // 07... -> +2547...
+    } else {
+        e164 = "+" + cleaned;                             // bare digits, assume intl
     }
 
     // Add whatsapp: prefix for Twilio
-    return "whatsapp:" + cleaned;
+    return "whatsapp:" + e164;
 }
 
 bool WhatsAppManager::sendTextMessage(const QString &recipientPhone, const QString &message)
@@ -145,8 +151,12 @@ bool WhatsAppManager::sendTextMessage(const QString &recipientPhone, const QStri
     qDebug() << "  To:" << toNumber;
     qDebug() << "  Message length:" << message.length();
 
-    // Send POST request
-    m_networkManager->post(request, postData.toString(QUrl::FullyEncoded).toUtf8());
+    // Send POST request; tag the reply with the original recipient so
+    // onReplyFinished can report it back (lets ScheduleManager correlate the
+    // async result to the schedule/recipient that triggered it).
+    QNetworkReply *reply =
+        m_networkManager->post(request, postData.toString(QUrl::FullyEncoded).toUtf8());
+    reply->setProperty("recipient", recipientPhone);
 
     return true;
 }
@@ -167,6 +177,7 @@ void WhatsAppManager::onReplyFinished(QNetworkReply *reply)
     QString status;
     bool success = false;
     QString messageId;
+    const QString recipient = reply->property("recipient").toString();
 
     if (reply->error() == QNetworkReply::NoError) {
         // Parse response
@@ -183,7 +194,7 @@ void WhatsAppManager::onReplyFinished(QNetworkReply *reply)
                          .arg(messageId, messageStatus);
 
             emit statusChanged(status);
-            emit messageSent(true, messageId);
+            emit messageSent(true, messageId, recipient);
 
             qDebug() << "✅ WhatsApp message sent successfully";
             qDebug() << "   Message ID:" << messageId;
@@ -196,7 +207,7 @@ void WhatsAppManager::onReplyFinished(QNetworkReply *reply)
             status = QString("Twilio API Error %1: %2").arg(errorCode).arg(errorMsg);
             emit statusChanged(status);
             emit errorOccurred(status);
-            emit messageSent(false, QString());
+            emit messageSent(false, QString(), recipient);
 
             qWarning() << "❌ Twilio error:" << errorCode << errorMsg;
 
@@ -207,6 +218,12 @@ void WhatsAppManager::onReplyFinished(QNetworkReply *reply)
             } else if (errorCode == 20003) {
                 qWarning() << "   Hint: Check your Account SID and Auth Token";
             }
+        } else {
+            // Unrecognized 2xx response — report failure so callers don't hang.
+            status = "Unexpected response from Twilio.";
+            emit statusChanged(status);
+            emit errorOccurred(status);
+            emit messageSent(false, QString(), recipient);
         }
     } else {
         // Network error
@@ -216,7 +233,7 @@ void WhatsAppManager::onReplyFinished(QNetworkReply *reply)
 
         emit statusChanged(status);
         emit errorOccurred(status);
-        emit messageSent(false, QString());
+        emit messageSent(false, QString(), recipient);
 
         qWarning() << "❌ Network error sending WhatsApp:" << reply->errorString();
     }

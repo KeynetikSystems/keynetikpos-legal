@@ -37,6 +37,10 @@ void ScheduleManager::registerProvider(MessageProvider *provider)
     for (auto *p : m_providers)
         if (p->providerName() == provider->providerName()) return;
     m_providers.append(provider);
+    // Observe the actual (async) delivery result, not just dispatch success.
+    connect(provider, &MessageProvider::messageSent,
+            this, &ScheduleManager::onProviderMessageSent,
+            Qt::UniqueConnection);
     qDebug() << "ScheduleManager: registered provider" << provider->providerName();
 }
 
@@ -256,6 +260,7 @@ void ScheduleManager::onTick()
 {
     for (auto &s : m_schedules) {
         if (!s.isActive) continue;
+        if (m_inFlight.contains(s.scheduleId)) continue;   // a send is still pending
         if (shouldFire(s)) dispatchSchedule(s);
     }
 }
@@ -311,30 +316,102 @@ bool ScheduleManager::sendNow(int scheduleId, const QString &body)
 
     MessageProvider *provider = getProvider(s.providerName);
     if (!provider) {
-        emit messageError(scheduleId,
-                          "Provider not found: " + s.providerName);
+        emit messageError(scheduleId, "Provider not found: " + s.providerName);
+        emit scheduleFired(scheduleId, false);
+        return false;
+    }
+    if (s.recipients.isEmpty()) {
+        emit messageError(scheduleId, "No recipients configured");
+        emit scheduleFired(scheduleId, false);
         return false;
     }
 
     // Build the report body if the caller passed an empty string (e.g. manual "Send Now")
     const QString messageBody = body.isEmpty() ? buildReportBody(s) : body;
 
-    bool anySuccess = false;
-    for (const QString &recipient : s.recipients) {
-        if (provider->sendMessage(recipient, messageBody)) anySuccess = true;
-    }
+    // Mark in-flight up front so a second tick within the same minute can't
+    // re-dispatch while we wait for the providers' async replies. lastSent is
+    // set ONLY when a reply confirms success (see finalizeInFlight()).
+    m_inFlight.insert(scheduleId, InFlight{});
 
-    // Update lastSent
-    for (auto &sched : m_schedules) {
-        if (sched.scheduleId == scheduleId) {
-            sched.lastSent = QDateTime::currentDateTime();
-            if (m_dbReady) persistSchedule(sched);
-            break;
+    for (const QString &recipient : s.recipients) {
+        m_pending.append({scheduleId, phoneKey(recipient), provider->providerName()});
+        if (provider->sendMessage(recipient, messageBody)) {
+            m_inFlight[scheduleId].awaiting++;   // expect an async result
+        } else {
+            // Rejected synchronously (e.g. not configured) — no reply will come.
+            m_pending.removeLast();
+            emit messageError(scheduleId, "Send rejected for " + recipient);
         }
     }
 
-    emit scheduleFired(scheduleId, anySuccess);
-    return anySuccess;
+    // If nothing was actually dispatched, finalize immediately as a failure.
+    if (m_inFlight[scheduleId].awaiting == 0) {
+        finalizeInFlight(scheduleId);
+        return false;
+    }
+    return true;   // outcome reported asynchronously via onProviderMessageSent()
+}
+
+void ScheduleManager::onProviderMessageSent(bool success,
+                                            const QString &messageId,
+                                            const QString &recipient)
+{
+    auto *prov = qobject_cast<MessageProvider *>(sender());
+    const QString provName = prov ? prov->providerName() : QString();
+    const QString key = phoneKey(recipient);
+
+    // Correlate to the oldest pending send from this provider; prefer an exact
+    // recipient match, else fall back to FIFO for this provider.
+    int idx = -1;
+    for (int i = 0; i < m_pending.size(); ++i)
+        if (m_pending[i].providerName == provName && m_pending[i].recipientKey == key) { idx = i; break; }
+    if (idx < 0)
+        for (int i = 0; i < m_pending.size(); ++i)
+            if (m_pending[i].providerName == provName) { idx = i; break; }
+    if (idx < 0) return;   // nothing to correlate (e.g. a one-off test send)
+
+    const int scheduleId = m_pending[idx].scheduleId;
+    m_pending.removeAt(idx);
+
+    if (!m_inFlight.contains(scheduleId)) return;
+    InFlight &fl = m_inFlight[scheduleId];
+    if (fl.awaiting > 0) fl.awaiting--;
+
+    if (success) {
+        fl.anyOk = true;
+        emit messageDelivered(scheduleId, messageId);
+    } else {
+        emit messageError(scheduleId,
+                          messageId.isEmpty() ? QStringLiteral("Delivery failed") : messageId);
+    }
+
+    if (fl.awaiting == 0) finalizeInFlight(scheduleId);
+}
+
+void ScheduleManager::finalizeInFlight(int scheduleId)
+{
+    const bool ok = m_inFlight.value(scheduleId).anyOk;
+    m_inFlight.remove(scheduleId);
+
+    for (auto &sched : m_schedules) {
+        if (sched.scheduleId != scheduleId) continue;
+        if (ok)
+            sched.lastSent = QDateTime::currentDateTime();   // only on confirmed success
+        else
+            sched.failedAttempts++;
+        if (m_dbReady) persistSchedule(sched);
+        break;
+    }
+    emit scheduleFired(scheduleId, ok);
+}
+
+QString ScheduleManager::phoneKey(const QString &phone)
+{
+    QString digits;
+    for (const QChar &c : phone)
+        if (c.isDigit()) digits.append(c);
+    return digits;
 }
 
 QString ScheduleManager::buildReportBody(const MessageSchedule &s) const

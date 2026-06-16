@@ -25,6 +25,7 @@
 #include <QObject>
 #include <QVector>
 #include <QTimer>
+#include <QHash>
 #include <QSqlDatabase>
 #include "MessageSchedule.h"
 #include "messageprovider.h"
@@ -66,6 +67,10 @@ signals:
 
 private slots:
     void onTick();
+    // Async delivery result from a provider (base-class messageSent signal),
+    // correlated back to the schedule/recipient that triggered it.
+    void onProviderMessageSent(bool success, const QString &messageId,
+                               const QString &recipient);
 
 private:
     bool shouldFire(const MessageSchedule &s) const;
@@ -73,12 +78,23 @@ private:
     bool dispatchSchedule(MessageSchedule &s);
     bool persistSchedule(MessageSchedule &s);   // INSERT or UPDATE
     void loadFromDb();
+    void finalizeInFlight(int scheduleId);      // emits scheduleFired, sets lastSent on success
+    static QString phoneKey(const QString &phone);   // digits-only correlation key
 
     QTimer *m_timer;
     QVector<MessageSchedule> m_schedules;
     QVector<MessageProvider *> m_providers;
     int m_nextId = 1;
     bool m_dbReady = false;
+
+    // ── Async send tracking ─────────────────────────────────────────────────
+    // One dispatched message awaiting its provider result.
+    struct Pending { int scheduleId; QString recipientKey; QString providerName; };
+    QVector<Pending> m_pending;
+    // Aggregate state per schedule while its sends are in flight (blocks
+    // re-dispatch and decides overall success once all replies are in).
+    struct InFlight { int awaiting = 0; bool anyOk = false; };
+    QHash<int, InFlight> m_inFlight;
 };
 
 #endif // SCHEDULEMANAGER_H
