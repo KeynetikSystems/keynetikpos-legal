@@ -256,51 +256,99 @@ void ScheduleManager::stop()
     m_timer->stop();
 }
 
+namespace {
+constexpr int kMaxAttemptsPerWindow = 3;     // give up after this many tries...
+constexpr int kRetrySpacingSecs     = 300;   // ...spaced at least 5 minutes apart
+}
+
 void ScheduleManager::onTick()
 {
+    const QDateTime now = QDateTime::currentDateTime();
     for (auto &s : m_schedules) {
         if (!s.isActive) continue;
         if (m_inFlight.contains(s.scheduleId)) continue;   // a send is still pending
-        if (shouldFire(s)) dispatchSchedule(s);
+        if (!shouldFire(s)) continue;
+
+        // Record the attempt for retry throttling (reset the counter when we
+        // enter a new due window).
+        const QDateTime due = mostRecentDue(s, now);
+        if (m_windowMark.value(s.scheduleId) != due) {
+            m_windowMark[s.scheduleId]     = due;
+            m_windowAttempts[s.scheduleId] = 0;
+        }
+        m_windowAttempts[s.scheduleId]++;
+        m_lastAttempt[s.scheduleId] = now;
+
+        dispatchSchedule(s);
+    }
+}
+
+QDateTime ScheduleManager::mostRecentDue(const MessageSchedule &s, const QDateTime &now)
+{
+    switch (s.type) {
+    case MessageSchedule::Daily: {
+        QDateTime due(now.date(), s.sendTime);
+        if (due > now) due = due.addDays(-1);
+        return due;
+    }
+    case MessageSchedule::Weekly: {
+        // Walk back to the most recent occurrence of dayOfWeek at/before now.
+        const int delta = (now.date().dayOfWeek() - s.dayOfWeek + 7) % 7;
+        QDateTime due(now.date().addDays(-delta), s.sendTime);
+        if (due > now) due = due.addDays(-7);
+        return due;
+    }
+    case MessageSchedule::Monthly: {
+        const QDate today = now.date();
+        QDate d(today.year(), today.month(),
+                qMin(s.dayOfMonth, today.daysInMonth()));
+        QDateTime due(d, s.sendTime);
+        if (due > now) {
+            const QDate pm = today.addMonths(-1);
+            due = QDateTime(QDate(pm.year(), pm.month(),
+                                  qMin(s.dayOfMonth, pm.daysInMonth())),
+                            s.sendTime);
+        }
+        return due;
+    }
+    default:
+        return QDateTime();   // event-based types are not time-driven
     }
 }
 
 bool ScheduleManager::shouldFire(const MessageSchedule &s) const
 {
-    QDateTime now = QDateTime::currentDateTime();
-    QTime nowTime = now.time();
+    const QDateTime now = QDateTime::currentDateTime();
+    const QDateTime due = mostRecentDue(s, now);
+    if (!due.isValid()) return false;   // event-based: fired via notify*(), not here
 
-    // Don't re-send within the same minute
-    if (s.lastSent.isValid() && s.lastSent.secsTo(now) < 60) return false;
+    // Already delivered this window, or the window predates the schedule's
+    // creation? Then nothing to do. lastSent is set only on confirmed delivery,
+    // so a failed send leaves the window open for a (bounded) retry.
+    const QDateTime baseline = s.lastSent.isValid() ? s.lastSent : s.createdDate;
+    if (baseline.isValid() && baseline >= due) return false;
 
-    switch (s.type) {
-    case MessageSchedule::Daily:
-        return nowTime.hour()   == s.sendTime.hour() &&
-               nowTime.minute() == s.sendTime.minute();
-
-    case MessageSchedule::Weekly:
-        return now.date().dayOfWeek() == s.dayOfWeek &&
-               nowTime.hour()         == s.sendTime.hour() &&
-               nowTime.minute()       == s.sendTime.minute();
-
-    case MessageSchedule::Monthly:
-        return now.date().day()  == s.dayOfMonth &&
-               nowTime.hour()    == s.sendTime.hour() &&
-               nowTime.minute()  == s.sendTime.minute();
-
-    case MessageSchedule::OnShiftClose:
-        // Triggered externally — not time-based
-        return false;
-
-    case MessageSchedule::OnSalesThreshold:
-        // Triggered externally — not time-based
-        return false;
-
-    case MessageSchedule::Custom:
-        // Future: use eventCondition
-        return false;
+    // Bounded retry within the same window: cap the count and space attempts.
+    if (m_windowMark.value(s.scheduleId) == due) {
+        if (m_windowAttempts.value(s.scheduleId) >= kMaxAttemptsPerWindow)
+            return false;
+        const QDateTime last = m_lastAttempt.value(s.scheduleId);
+        if (last.isValid() && last.secsTo(now) < kRetrySpacingSecs)
+            return false;
     }
-    return false;
+    return true;
+}
+
+void ScheduleManager::notifySalesThreshold(double todaysSalesTotal)
+{
+    for (auto &s : m_schedules) {
+        if (!s.isActive || s.type != MessageSchedule::OnSalesThreshold) continue;
+        if (s.salesThreshold <= 0.0 || todaysSalesTotal < s.salesThreshold) continue;
+        if (m_inFlight.contains(s.scheduleId)) continue;
+        // Once per calendar day (lastSent is set on confirmed delivery).
+        if (s.lastSent.isValid() && s.lastSent.date() == QDate::currentDate()) continue;
+        dispatchSchedule(s);
+    }
 }
 
 bool ScheduleManager::dispatchSchedule(MessageSchedule &s)

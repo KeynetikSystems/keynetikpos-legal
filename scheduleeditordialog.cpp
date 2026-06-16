@@ -56,9 +56,9 @@ void ScheduleEditorDialog::setupUi()
     m_typeCombo->addItem("Daily", MessageSchedule::Daily);
     m_typeCombo->addItem("Weekly", MessageSchedule::Weekly);
     m_typeCombo->addItem("Monthly", MessageSchedule::Monthly);
-    m_typeCombo->addItem("On Shift Close", MessageSchedule::OnShiftClose);
     m_typeCombo->addItem("On Sales Threshold", MessageSchedule::OnSalesThreshold);
-    m_typeCombo->addItem("Custom", MessageSchedule::Custom);
+    // OnShiftClose (no shift workflow wired) and Custom (no defined trigger)
+    // are intentionally omitted — they could never fire.
     connect(m_typeCombo, QOverload<int>::of(&QComboBox::currentIndexChanged),
             this, &ScheduleEditorDialog::onScheduleTypeChanged);
     basicLayout->addRow("Schedule Type*:", m_typeCombo);

@@ -60,6 +60,11 @@ public:
     // Manual trigger (for testing)
     bool sendNow(int scheduleId, const QString &body);
 
+    // Event trigger: call after a sale is recorded with today's running sales
+    // total (major units). Fires any active OnSalesThreshold schedule whose
+    // threshold has been crossed, at most once per calendar day.
+    void notifySalesThreshold(double todaysSalesTotal);
+
 signals:
     void scheduleFired(int scheduleId, bool success);
     void messageDelivered(int scheduleId, const QString &messageId);
@@ -74,6 +79,9 @@ private slots:
 
 private:
     bool shouldFire(const MessageSchedule &s) const;
+    // The most recent moment this (time-based) schedule was due at/before `now`,
+    // or an invalid QDateTime for event-based types. Used for catch-up firing.
+    static QDateTime mostRecentDue(const MessageSchedule &s, const QDateTime &now);
     QString buildReportBody(const MessageSchedule &s) const;
     bool dispatchSchedule(MessageSchedule &s);
     bool persistSchedule(MessageSchedule &s);   // INSERT or UPDATE
@@ -95,6 +103,13 @@ private:
     // re-dispatch and decides overall success once all replies are in).
     struct InFlight { int awaiting = 0; bool anyOk = false; };
     QHash<int, InFlight> m_inFlight;
+
+    // ── Retry throttling (in-memory; resets on restart) ─────────────────────
+    // Bounds retries within a single due window so a persistently failing send
+    // can't hammer the provider every tick.
+    QHash<int, QDateTime> m_lastAttempt;    // scheduleId -> last dispatch time
+    QHash<int, QDateTime> m_windowMark;     // scheduleId -> due time of current window
+    QHash<int, int>       m_windowAttempts; // scheduleId -> attempts in that window
 };
 
 #endif // SCHEDULEMANAGER_H

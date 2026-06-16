@@ -1045,6 +1045,10 @@ void MainWindow::onCheckout()
     for (int pid : soldProductIds)
         productModel->updateStock(pid, Database::instance().getProductById(pid).stockQuantity);
 
+    // A sale may push today's total over a configured sales-threshold schedule.
+    scheduleManager->notifySalesThreshold(
+        Database::instance().getTotalSalesToday().toMajor());
+
     // Non-blocking success: a blocking dialog after every sale slows the queue.
     // Change due is the one figure the cashier must act on, so it stays in the
     // persistent status bar in addition to the auto-dismissing toast. Focus
