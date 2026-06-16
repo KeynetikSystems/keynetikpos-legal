@@ -46,12 +46,13 @@ namespace {
 
 QString getStatusIcon(InventoryStatus status)
 {
+    // Status is shown as plain text (getStatusText); no icon glyphs.
     switch (status) {
-    case InventoryStatus::Healthy:    return "✓";
-    case InventoryStatus::Low:        return "⚠";
-    case InventoryStatus::Critical:   return "⚠";
-    case InventoryStatus::OutOfStock: return "✗";
-    default:                          return "?";
+    case InventoryStatus::Healthy:    return "";
+    case InventoryStatus::Low:        return "";
+    case InventoryStatus::Critical:   return "";
+    case InventoryStatus::OutOfStock: return "";
+    default:                          return "";
     }
 }
 
@@ -634,8 +635,7 @@ void InventoryDialog::updateProductsList()
             stockItem->setBackground(QBrush(QColor(scheme.warningBg)));
         inventoryTable->setItem(row, 5, stockItem);
 
-        QString statusText = getStatusIcon(info.status) + " " +
-                             inventoryManager->getStatusText(info.status);
+        QString statusText = inventoryManager->getStatusText(info.status);
         QTableWidgetItem *statusItem = new QTableWidgetItem(statusText);
         statusItem->setTextAlignment(Qt::AlignCenter);
         statusItem->setForeground(
@@ -701,8 +701,7 @@ void InventoryDialog::updateAlertsTable()
         reorderItem->setTextAlignment(Qt::AlignCenter);
         alertsTable->setItem(row, 3, reorderItem);
 
-        QString statusText = getStatusIcon(info.status) + " " +
-                             inventoryManager->getStatusText(info.status);
+        QString statusText = inventoryManager->getStatusText(info.status);
         QTableWidgetItem *statusItem = new QTableWidgetItem(statusText);
         statusItem->setTextAlignment(Qt::AlignCenter);
         statusItem->setForeground(
@@ -852,8 +851,7 @@ void InventoryDialog::updateStockManagementTable()
                                 "(0 = no alerts).");
         stockManagementTable->setItem(row, 8, reorderItem);
 
-        QString statusText = getStatusIcon(info.status) + " " +
-                             inventoryManager->getStatusText(info.status);
+        QString statusText = inventoryManager->getStatusText(info.status);
         QTableWidgetItem *statusItem = new QTableWidgetItem(statusText);
         statusItem->setFlags(statusItem->flags() & ~Qt::ItemIsEditable);
         statusItem->setTextAlignment(Qt::AlignCenter);
@@ -935,8 +933,7 @@ void InventoryDialog::onStockTableCellChanged(int row, int column)
                 InventoryStatus status =
                     InventoryManager::calculateStatus(qty, reorder);
                 if (auto *si = stockManagementTable->item(row, 9)) {
-                    si->setText(getStatusIcon(status) + " " +
-                                inventoryManager->getStatusText(status));
+                    si->setText(inventoryManager->getStatusText(status));
                     si->setForeground(
                         QBrush(QColor(inventoryManager->getStatusColor(status))));
                 }
@@ -1001,7 +998,7 @@ void InventoryDialog::onAddNewItemClicked()
                             "(0 = no alerts).");
     stockManagementTable->setItem(row, 8, reorderItem);
 
-    QTableWidgetItem *statusItem = new QTableWidgetItem("✗ Out of Stock");
+    QTableWidgetItem *statusItem = new QTableWidgetItem("Out of Stock");
     statusItem->setFlags(statusItem->flags() & ~Qt::ItemIsEditable);
     statusItem->setTextAlignment(Qt::AlignCenter);
     statusItem->setForeground(QBrush(QColor(scheme.textSecondary)));
@@ -1270,16 +1267,9 @@ void InventoryDialog::onAutoRefreshToggled(bool checked)
 void InventoryDialog::onInventoryChanged()    { loadInventoryData(); }
 void InventoryDialog::onCloseClicked()        { close(); }
 
-void InventoryDialog::showNotification(const QString &message, NotificationType type)
+void InventoryDialog::showNotification(const QString &message, NotificationType /*type*/)
 {
-    QString icon;
-    switch (type) {
-    case NotificationType::Success: icon = "✓"; break;
-    case NotificationType::Error:   icon = "✗"; break;
-    case NotificationType::Warning: icon = "⚠"; break;
-    default:                        icon = "ℹ"; break;
-    }
-    lastUpdatedLabel->setText(QString("%1 %2").arg(icon, message));
+    lastUpdatedLabel->setText(message);
     QTimer::singleShot(3000, this, &InventoryDialog::updateLastUpdatedTime);
 }
 

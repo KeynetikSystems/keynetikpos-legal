@@ -285,7 +285,7 @@ void MainWindow::initBarcodeReader()
             this,            &MainWindow::onBarcodeError);
 
     if (!m_barcodeReader->open()) {
-        statusLabel->setText("⚠ Barcode scanner failed to open — check settings.");
+        statusLabel->setText("Barcode scanner failed to open — check settings.");
         return;
     }
 
@@ -317,7 +317,7 @@ void MainWindow::onBarcodeScanned(const QString &barcode)
     Product product = Database::instance().getProductByBarcode(code);
 
     if (product.id <= 0) {
-        const QString msg = QString("⚠ Unknown barcode: %1").arg(code);
+        const QString msg = QString("Unknown barcode: %1").arg(code);
         statusLabel->setText(msg);
         showToast(msg, "warning");
         qDebug() << "[Barcode] Not found:" << code;
@@ -326,7 +326,7 @@ void MainWindow::onBarcodeScanned(const QString &barcode)
 
     // ── 2. Stock check ───────────────────────────────────────────────────
     if (product.stockQuantity <= 0) {
-        const QString msg = QString("⛔ Out of stock: %1").arg(product.name);
+        const QString msg = QString("Out of stock: %1").arg(product.name);
         statusLabel->setText(msg);
         showToast(msg, "error");
         qDebug() << "[Barcode] Out of stock:" << product.name;
@@ -339,7 +339,7 @@ void MainWindow::onBarcodeScanned(const QString &barcode)
 
     // ── 4. Visual feedback ───────────────────────────────────────────────
     showToast(
-        QString("✔ %1  —  %2")
+        QString("%1  —  %2")
             .arg(product.name, formatCurrency(product.price)),
         "success");
 
@@ -349,7 +349,7 @@ void MainWindow::onBarcodeScanned(const QString &barcode)
 
 void MainWindow::onBarcodeError(const QString &error)
 {
-    const QString msg = QString("⚠ Scanner error: %1").arg(error);
+    const QString msg = QString("Scanner error: %1").arg(error);
     statusLabel->setText(msg);
     showToast(msg, "error");
     qWarning() << "[BarcodeReader]" << error;
@@ -392,19 +392,19 @@ void MainWindow::setupUserInterface()
 {
     QMenu *userMenu = menuBar()->addMenu("&User");
 
-    userManagementAction = new QAction("👤 User Management", this);
+    userManagementAction = new QAction("User Management", this);
     connect(userManagementAction, &QAction::triggered,
             this, &MainWindow::onUserManagement);
     userMenu->addAction(userManagementAction);
 
-    changePasswordAction = new QAction("🔑 Change Password", this);
+    changePasswordAction = new QAction("Change Password", this);
     connect(changePasswordAction, &QAction::triggered,
             this, &MainWindow::onChangePassword);
     userMenu->addAction(changePasswordAction);
 
     userMenu->addSeparator();
 
-    logoutAction = new QAction("🚪 Logout", this);
+    logoutAction = new QAction("Logout", this);
     logoutAction->setShortcut(QKeySequence("Ctrl+L"));
     connect(logoutAction, &QAction::triggered, this, &MainWindow::onLogout);
     userMenu->addAction(logoutAction);
@@ -432,7 +432,7 @@ void MainWindow::showCurrentUserInfo()
     }
     User currentUser = UserManager::instance().getCurrentUser();
     currentUserLabel->setText(
-        QString("👤 %1 (%2)")
+        QString("%1 (%2)")
             .arg(currentUser.fullName,
                  RoleManager::roleToString(currentUser.role)));
 }
@@ -444,65 +444,65 @@ void MainWindow::setupMenuBar()
 
     // File
     QMenu *fileMenu = mb->addMenu("&File");
-    QAction *newSaleAction = fileMenu->addAction("➕ New Sale");
+    QAction *newSaleAction = fileMenu->addAction("New Sale");
     newSaleAction->setShortcut(QKeySequence::New);
     connect(newSaleAction, &QAction::triggered, this, &MainWindow::onNewSale);
     fileMenu->addSeparator();
-    QAction *exitAction = fileMenu->addAction("🚪 Exit");
+    QAction *exitAction = fileMenu->addAction("Exit");
     // QKeySequence::Quit is empty on Windows — bind Ctrl+Q explicitly
     exitAction->setShortcut(QKeySequence(Qt::CTRL | Qt::Key_Q));
     connect(exitAction, &QAction::triggered, this, &QMainWindow::close);
 
     // Sales
     QMenu *salesMenu = mb->addMenu("&Sales");
-    connect(salesMenu->addAction("📜 View Sales History"),
+    connect(salesMenu->addAction("View Sales History"),
             &QAction::triggered, this, &MainWindow::onViewSalesHistory);
-    connect(salesMenu->addAction("🖨 Reprint Last Receipt"),
+    connect(salesMenu->addAction("Reprint Last Receipt"),
             &QAction::triggered, this, &MainWindow::onReprintReceipt);
-    connect(salesMenu->addAction("✉ Email Last Receipt"),
+    connect(salesMenu->addAction("Email Last Receipt"),
             &QAction::triggered, this, &MainWindow::onEmailReceipt);
 
     // Inventory
     QMenu *inventoryMenu = mb->addMenu("&Inventory");
-    inventoryButton = inventoryMenu->addAction("📦 Manage Inventory");
+    inventoryButton = inventoryMenu->addAction("Manage Inventory");
     connect(inventoryButton, &QAction::triggered,
             this, &MainWindow::onManageInventory);
-    connect(inventoryMenu->addAction("➕ Add Product"),
+    connect(inventoryMenu->addAction("Add Product"),
             &QAction::triggered, this, &MainWindow::onAddProduct);
     inventoryMenu->addSeparator();
-    connect(inventoryMenu->addAction("🚨 Low Stock Alert"),
+    connect(inventoryMenu->addAction("Low Stock Alert"),
             &QAction::triggered, this, &MainWindow::onShowLowStock);
 
     // Reports
     QMenu *reportsMenu = mb->addMenu("&Reports");
-    analyticsButton = reportsMenu->addAction("📊 Analytics Dashboard");
+    analyticsButton = reportsMenu->addAction("Analytics Dashboard");
     connect(analyticsButton, &QAction::triggered,
             this, &MainWindow::onShowAnalytics);
-    reportsButton = reportsMenu->addAction("📋 Daily Report");
+    reportsButton = reportsMenu->addAction("Daily Report");
     connect(reportsButton, &QAction::triggered,
             this, &MainWindow::onDailyReport);
-    connect(reportsMenu->addAction("📄 Detailed Reports"),
+    connect(reportsMenu->addAction("Detailed Reports"),
             &QAction::triggered, this, &MainWindow::onShowReports);
 
     // Settings
     QMenu *settingsMenu = mb->addMenu("&Settings");
-    connect(settingsMenu->addAction("🏢 Company Information"),
+    connect(settingsMenu->addAction("Company Information"),
             &QAction::triggered, this, &MainWindow::onCompanySettings);
-    connect(settingsMenu->addAction("📅 Message Schedules"),
+    connect(settingsMenu->addAction("Message Schedules"),
             &QAction::triggered, this, &MainWindow::onManageSchedules);
-    connect(settingsMenu->addAction("🧾 Receipt Settings"),
+    connect(settingsMenu->addAction("Receipt Settings"),
             &QAction::triggered, this, &MainWindow::onReceiptSettings);
-    connect(settingsMenu->addAction("💾 Backup Now"),
+    connect(settingsMenu->addAction("Backup Now"),
             &QAction::triggered, this, &MainWindow::onBackupNow);
     settingsMenu->addSeparator();
-    themeAction = settingsMenu->addAction("🌙 Toggle Dark Mode");
+    themeAction = settingsMenu->addAction("Toggle Dark Mode");
     connect(themeAction, &QAction::triggered, this, &MainWindow::onToggleTheme);
 
     // Help
     QMenu *helpMenu = mb->addMenu("Help");
-    connect(helpMenu->addAction("ℹ About"),
+    connect(helpMenu->addAction("About"),
             &QAction::triggered, this, &MainWindow::onAbout);
-    connect(helpMenu->addAction("⌨ Keyboard Shortcuts"),
+    connect(helpMenu->addAction("Keyboard Shortcuts"),
             &QAction::triggered, this, &MainWindow::onShowShortcuts);
 }
 
@@ -531,17 +531,17 @@ void MainWindow::setupStatusBar()
     sep->setFrameShadow(QFrame::Sunken);
     sb->addPermanentWidget(sep);
 
-    QPushButton *inventoryBtn = createStatusBarButton("📦 Inventory", "info");
+    QPushButton *inventoryBtn = createStatusBarButton("Inventory", "info");
     connect(inventoryBtn, &QPushButton::clicked,
             this, &MainWindow::onManageInventory);
     sb->addPermanentWidget(inventoryBtn);
 
-    QPushButton *salesBtn = createStatusBarButton("📜 Sales", "info");
+    QPushButton *salesBtn = createStatusBarButton("Sales", "info");
     connect(salesBtn, &QPushButton::clicked,
             this, &MainWindow::onViewSalesHistory);
     sb->addPermanentWidget(salesBtn);
 
-    QPushButton *analyticsBtn = createStatusBarButton("📊 Analytics", "primary");
+    QPushButton *analyticsBtn = createStatusBarButton("Analytics", "primary");
     connect(analyticsBtn, &QPushButton::clicked,
             this, &MainWindow::onShowAnalytics);
     sb->addPermanentWidget(analyticsBtn);
@@ -561,7 +561,7 @@ void MainWindow::setupProductsPanel()
     // every keystroke (no debounce needed).
     QHBoxLayout *searchLayout = new QHBoxLayout();
     searchEdit = new QLineEdit();
-    searchEdit->setPlaceholderText("🔍 Search products by name or barcode...");
+    searchEdit->setPlaceholderText("Search products by name or barcode...");
     searchEdit->setMinimumHeight(40);
     searchEdit->setClearButtonEnabled(true);
     searchEdit->setAccessibleName("Product search");
@@ -742,7 +742,7 @@ void MainWindow::setupActionButtons()
 {
     actionsLayout = new QVBoxLayout();
 
-    discountButton = new QPushButton("🏷 Apply Discount");
+    discountButton = new QPushButton("Apply Discount");
     discountButton->setMinimumHeight(45);
     discountButton->setProperty("kind", "warning");
     discountButton->setAccessibleName("Apply discount");
@@ -751,7 +751,7 @@ void MainWindow::setupActionButtons()
             this, &MainWindow::onApplyDiscount);
     actionsLayout->addWidget(discountButton);
 
-    QPushButton *clearBtn = new QPushButton("🗑 Clear Cart");
+    QPushButton *clearBtn = new QPushButton("Clear Cart");
     clearBtn->setMinimumHeight(45);
     clearBtn->setProperty("kind", "danger");
     clearBtn->setAccessibleName("Clear cart");
@@ -759,7 +759,7 @@ void MainWindow::setupActionButtons()
     connect(clearBtn, &QPushButton::clicked, this, &MainWindow::onClearCart);
     actionsLayout->addWidget(clearBtn);
 
-    checkoutBtn = new QPushButton("💳 CHECKOUT");
+    checkoutBtn = new QPushButton("CHECKOUT");
     checkoutBtn->setObjectName("checkoutButton");
     checkoutBtn->setMinimumHeight(60);
     checkoutBtn->setProperty("kind", "primary");
@@ -1038,9 +1038,9 @@ void MainWindow::onCheckout()
     // persistent status bar in addition to the auto-dismissing toast. Focus
     // returns to the search box, ready for the next customer.
     const QString summary = change.cents() > 0
-        ? QString("✔ Sale #%1 complete — Change due: %2")
+        ? QString("Sale #%1 complete — Change due: %2")
               .arg(result.saleId).arg(formatCurrency(change))
-        : QString("✔ Sale #%1 complete — receipt saved").arg(result.saleId);
+        : QString("Sale #%1 complete — receipt saved").arg(result.saleId);
     statusLabel->setText(summary);
     showToast(summary, "success");
     searchEdit->clear();
@@ -1089,7 +1089,7 @@ void MainWindow::setupCartSelector()
 
     layout->addWidget(cartTabWidget, 1);
 
-    QPushButton *newCartBtn = new QPushButton("➕ New Cart");
+    QPushButton *newCartBtn = new QPushButton("New Cart");
     newCartBtn->setObjectName("newCartButton");
     newCartBtn->setToolTip("Create new shopping cart (F5)");
     newCartBtn->setMinimumHeight(38);
@@ -1267,10 +1267,10 @@ void MainWindow::onCartTabContextMenu(const QPoint &pos)
 {
     QMenu contextMenu(tr("Cart Actions"), this);
     if (cartService->count() > 1) {
-        connect(contextMenu.addAction("🗑 Delete Cart"),
+        connect(contextMenu.addAction("Delete Cart"),
                 &QAction::triggered, this, &MainWindow::onDeleteCart);
         contextMenu.addSeparator();
-        connect(contextMenu.addAction("🔀 Merge Cart"),
+        connect(contextMenu.addAction("Merge Cart"),
                 &QAction::triggered, this, &MainWindow::onMergeCart);
     }
     contextMenu.exec(cartTabWidget->mapToGlobal(pos));
@@ -1325,7 +1325,7 @@ void MainWindow::onInventoryLow(int productId, const QString &productName,
 {
     Q_UNUSED(productId)
     statusLabel->setText(
-        QString("🟡 Low stock: %1 (%2 units)").arg(productName).arg(quantity));
+        QString("Low stock: %1 (%2 units)").arg(productName).arg(quantity));
 }
 
 void MainWindow::onInventoryCritical(int productId, const QString &productName,
@@ -1333,7 +1333,7 @@ void MainWindow::onInventoryCritical(int productId, const QString &productName,
 {
     Q_UNUSED(productId)
     statusLabel->setText(
-        QString("🔴 CRITICAL: %1 (%2 units)").arg(productName).arg(quantity));
+        QString("CRITICAL: %1 (%2 units)").arg(productName).arg(quantity));
 }
 
 void MainWindow::onInventoryOutOfStock(int productId,
@@ -1341,7 +1341,7 @@ void MainWindow::onInventoryOutOfStock(int productId,
 {
     Q_UNUSED(productId)
     statusLabel->setText(
-        QString("⛔ OUT OF STOCK: %1").arg(productName));
+        QString("OUT OF STOCK: %1").arg(productName));
 }
 
 // =============================================================================
@@ -1488,7 +1488,7 @@ void MainWindow::onDailyReport()
     QGridLayout *g = new QGridLayout(&dlg);
     g->setColumnStretch(1, 1);
 
-    QLabel *title = new QLabel("📋 Daily Report");
+    QLabel *title = new QLabel("Daily Report");
     title->setProperty("role", "dialogTitle");
     g->addWidget(title, 0, 0, 1, 2);
 
@@ -1609,8 +1609,8 @@ void MainWindow::applyTheme()
     // Application-wide: dialogs (including parentless ones) inherit the sheet.
     qApp->setStyleSheet(appStylesheet(isDarkMode));
     QApplication::setPalette(appPalette(isDarkMode));
-    themeAction->setText(isDarkMode ? "☀ Toggle Light Mode"
-                                    : "🌙 Toggle Dark Mode");
+    themeAction->setText(isDarkMode ? "Toggle Light Mode"
+                                    : "Toggle Dark Mode");
     statusLabel->setText(isDarkMode ? "Dark mode enabled"
                                     : "Light mode enabled");
 }
@@ -1670,13 +1670,13 @@ void MainWindow::onAbout()
         QString("KeynetikPOS v1.0\n\n"
                 "Professional Point of Sale System\n\n"
                 "Features:\n"
-                "  ✔ Sales Management\n"
-                "  ✔ Barcode Scanner (USB HID & Serial)\n"
-                "  ✔ Inventory Tracking\n"
-                "  ✔ Analytics Dashboard\n"
-                "  ✔ Receipt Printing\n"
-                "  ✔ User Management & RBAC\n"
-                "  ✔ Dark/Light Themes\n\n"
+                "  Sales Management\n"
+                "  Barcode Scanner (USB HID & Serial)\n"
+                "  Inventory Tracking\n"
+                "  Analytics Dashboard\n"
+                "  Receipt Printing\n"
+                "  User Management & RBAC\n"
+                "  Dark/Light Themes\n\n"
                 "This application uses Qt %1, licensed under the GNU LGPL v3.\n"
                 "Qt is a trademark of The Qt Company.\n"
                 "https://www.qt.io").arg(qVersion()));

@@ -30,7 +30,7 @@
 OpenShiftDialog::OpenShiftDialog(QWidget *parent)
     : QDialog(parent)
 {
-    setWindowTitle("🕐 Open Shift");
+    setWindowTitle("Open Shift");
     setFixedSize(380, 260);
 
     auto *layout = new QVBoxLayout(this);
@@ -72,7 +72,7 @@ OpenShiftDialog::OpenShiftDialog(QWidget *parent)
     connect(cancelBtn, &QPushButton::clicked, this, &QDialog::reject);
     btnLayout->addWidget(cancelBtn);
 
-    auto *openBtn = new QPushButton("✔ Open Shift", this);
+    auto *openBtn = new QPushButton("Open Shift", this);
     openBtn->setDefault(true);
     openBtn->setProperty("kind", "primary");
     connect(openBtn, &QPushButton::clicked, this, &QDialog::accept);
@@ -93,7 +93,7 @@ CloseShiftDialog::CloseShiftDialog(const ShiftRecord &shift,
                                    QWidget *parent)
     : QDialog(parent)
 {
-    setWindowTitle("🕐 Close Shift");
+    setWindowTitle("Close Shift");
     setMinimumSize(420, 380);
 
     auto *layout = new QVBoxLayout(this);
@@ -163,7 +163,7 @@ CloseShiftDialog::CloseShiftDialog(const ShiftRecord &shift,
     connect(cancelBtn, &QPushButton::clicked, this, &QDialog::reject);
     btnLayout->addWidget(cancelBtn);
 
-    auto *closeBtn = new QPushButton("✔ Close Shift", this);
+    auto *closeBtn = new QPushButton("Close Shift", this);
     closeBtn->setDefault(true);
     closeBtn->setProperty("kind", "danger");
     connect(closeBtn, &QPushButton::clicked, this, &QDialog::accept);

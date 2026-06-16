@@ -77,11 +77,11 @@ QVariant CartModel::data(const QModelIndex &index, int role) const
         switch (index.column()) {
         case ColProduct:  return item.name;
         case ColPrice:    return formatMoney(item.price);
-        case ColDec:      return QStringLiteral("−");
+        case ColDec:      return QStringLiteral("-");
         case ColQty:      return item.quantity;
-        case ColInc:      return QStringLiteral("＋");
+        case ColInc:      return QStringLiteral("+");
         case ColSubtotal: return formatMoney(item.getSubtotal());
-        case ColRemove:   return QStringLiteral("✖");
+        case ColRemove:   return QStringLiteral("X");
         }
         break;
 
@@ -118,7 +118,7 @@ QVariant CartModel::data(const QModelIndex &index, int role) const
     case Qt::ToolTipRole:
         if (index.column() == ColDec)    return QStringLiteral("Decrease quantity");
         if (index.column() == ColInc)    return QStringLiteral("Increase quantity");
-        if (index.column() == ColQty)    return QStringLiteral("Tap − / ＋ or double-click to edit quantity");
+        if (index.column() == ColQty)    return QStringLiteral("Tap - / + or double-click to edit quantity");
         if (index.column() == ColRemove) return QStringLiteral("Remove item");
         break;
 

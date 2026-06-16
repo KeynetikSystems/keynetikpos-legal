@@ -634,7 +634,7 @@ void BarcodeScannerWidget::onTimeout()
 
 void BarcodeScannerWidget::onProductFound(int productId, QString productName, double price)
 {
-    m_statusLabel->setText(QString("✓ Found: %1").arg(productName));
+    m_statusLabel->setText(QString("Found: %1").arg(productName));
     setStyleProperty(m_statusLabel, "kind", "primary");
 
     emit productScanned(productId, productName, price);
@@ -648,7 +648,7 @@ void BarcodeScannerWidget::onProductFound(int productId, QString productName, do
 
 void BarcodeScannerWidget::onProductNotFound(QString barcode)
 {
-    m_statusLabel->setText(QString("✗ Not Found: %1").arg(barcode));
+    m_statusLabel->setText(QString("Not Found: %1").arg(barcode));
     setStyleProperty(m_statusLabel, "kind", "danger");
 
     // Reset after 3 seconds

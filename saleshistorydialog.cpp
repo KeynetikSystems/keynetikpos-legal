@@ -41,7 +41,7 @@ void SalesHistoryDialog::setupUI()
     QVBoxLayout *mainLayout = new QVBoxLayout(this);
 
     // Header
-    QLabel *titleLabel = new QLabel("📊 Sales History & Transactions");
+    QLabel *titleLabel = new QLabel("Sales History & Transactions");
     titleLabel->setProperty("role", "dialogTitle");
     mainLayout->addWidget(titleLabel);
 
@@ -81,7 +81,7 @@ void SalesHistoryDialog::setupUI()
     QHBoxLayout *searchLayout = new QHBoxLayout();
 
     searchEdit = new QLineEdit();
-    searchEdit->setPlaceholderText("🔍 Search by sale ID...");
+    searchEdit->setPlaceholderText("Search by sale ID...");
     searchLayout->addWidget(searchEdit);
 
     paymentMethodFilter = new QComboBox();
@@ -89,7 +89,7 @@ void SalesHistoryDialog::setupUI()
     connect(paymentMethodFilter, &QComboBox::currentTextChanged, this, &SalesHistoryDialog::onDateRangeChanged);
     searchLayout->addWidget(paymentMethodFilter);
 
-    searchBtn = new QPushButton("🔍 Search");
+    searchBtn = new QPushButton("Search");
     searchBtn->setProperty("kind", "info");
     connect(searchBtn, &QPushButton::clicked, this, &SalesHistoryDialog::onSearchClicked);
     searchLayout->addWidget(searchBtn);
@@ -156,13 +156,13 @@ void SalesHistoryDialog::setupUI()
     // Action buttons
     QHBoxLayout *actionLayout = new QHBoxLayout();
 
-    viewDetailsBtn = new QPushButton("👁️ View Details");
+    viewDetailsBtn = new QPushButton("View Details");
     viewDetailsBtn->setProperty("kind", "info");
     viewDetailsBtn->setEnabled(false);
     connect(viewDetailsBtn, &QPushButton::clicked, this, &SalesHistoryDialog::onViewDetailsClicked);
     actionLayout->addWidget(viewDetailsBtn);
 
-    refundBtn = new QPushButton("💸 Process Refund");
+    refundBtn = new QPushButton("Process Refund");
     refundBtn->setProperty("kind", "danger");
     refundBtn->setEnabled(false);
     connect(refundBtn, &QPushButton::clicked, this, &SalesHistoryDialog::onRefundClicked);
@@ -170,7 +170,7 @@ void SalesHistoryDialog::setupUI()
 
     actionLayout->addStretch();
 
-    exportBtn = new QPushButton("📥 Export CSV");
+    exportBtn = new QPushButton("Export CSV");
     exportBtn->setProperty("kind", "primary");
     connect(exportBtn, &QPushButton::clicked, this, &SalesHistoryDialog::onExportClicked);
     actionLayout->addWidget(exportBtn);
@@ -225,13 +225,7 @@ void SalesHistoryDialog::updateSalesTable()
         salesTable->setItem(row, 1, new QTableWidgetItem(sale.saleDate));
 
         // Payment Method
-        QString paymentIcon;
-        if (sale.paymentMethod == "Cash") paymentIcon = "💵";
-        else if (sale.paymentMethod == "Card") paymentIcon = "💳";
-        else if (sale.paymentMethod == "Mobile Money") paymentIcon = "📱";
-        else paymentIcon = "🔀";
-
-        QTableWidgetItem *paymentItem = new QTableWidgetItem(paymentIcon + " " + sale.paymentMethod);
+        QTableWidgetItem *paymentItem = new QTableWidgetItem(sale.paymentMethod);
         salesTable->setItem(row, 2, paymentItem);
 
         // Subtotal
@@ -262,7 +256,7 @@ void SalesHistoryDialog::updateSalesTable()
                     cell->setForeground(QBrush(QColor(scheme.error)));
                 }
             }
-            paymentItem->setText("↩ REFUNDED");
+            paymentItem->setText("REFUNDED");
         }
     }
 
@@ -323,7 +317,7 @@ void SalesHistoryDialog::showSaleDetails(int saleId)
                + QString("═══════════════════════════════\n");
 
     if (Database::instance().isRefunded(saleId)) {
-        details += QString("\n⚠ THIS SALE HAS BEEN REFUNDED\n");
+        details += QString("\nTHIS SALE HAS BEEN REFUNDED\n");
     }
 
     QMessageBox msgBox(this);
@@ -416,7 +410,7 @@ void SalesHistoryDialog::onRefundClicked()
                 }
                 // Update payment column to show refunded status
                 if (auto *cell = salesTable->item(row, 2))
-                    cell->setText("↩ REFUNDED");
+                    cell->setText("REFUNDED");
                 break;
             }
         }

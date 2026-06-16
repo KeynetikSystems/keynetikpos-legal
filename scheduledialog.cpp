@@ -19,7 +19,7 @@
 ScheduleDialog::ScheduleDialog(ScheduleManager *manager, QWidget *parent)
     : QDialog(parent), m_manager(manager)
 {
-    setWindowTitle("📅 Message Schedules");
+    setWindowTitle("Message Schedules");
     resize(900, 550);
     setupUi();
     refresh();
@@ -53,11 +53,11 @@ void ScheduleDialog::setupUi()
             this, &ScheduleDialog::onSelectionChanged);
 
     auto *btnLayout = new QHBoxLayout;
-    m_addBtn     = new QPushButton("➕ Add Schedule",   this);
-    m_editBtn    = new QPushButton("✏️ Edit",           this);
-    m_deleteBtn  = new QPushButton("🗑️ Delete",         this);
-    m_toggleBtn  = new QPushButton("🔄 Toggle Active",  this);
-    m_sendNowBtn = new QPushButton("📤 Send Now",       this);
+    m_addBtn     = new QPushButton("Add Schedule",   this);
+    m_editBtn    = new QPushButton("Edit",           this);
+    m_deleteBtn  = new QPushButton("Delete",         this);
+    m_toggleBtn  = new QPushButton("Toggle Active",  this);
+    m_sendNowBtn = new QPushButton("Send Now",       this);
 
     m_addBtn->setProperty("kind", "primary");
     m_deleteBtn->setProperty("kind", "danger");
@@ -101,7 +101,7 @@ void ScheduleDialog::refresh()
                                      QString::number(s.recipients.size()) + " recipient(s)"));
 
         const ColorScheme scheme = getColorScheme();
-        auto *statusItem = new QTableWidgetItem(s.isActive ? "✓ Active" : "✗ Paused");
+        auto *statusItem = new QTableWidgetItem(s.isActive ? "Active" : "Paused");
         statusItem->setForeground(QBrush(QColor(s.isActive ? scheme.success : scheme.error)));
         QFont f = statusItem->font(); f.setBold(true); statusItem->setFont(f);
         statusItem->setTextAlignment(Qt::AlignCenter);

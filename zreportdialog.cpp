@@ -39,7 +39,7 @@ ZReportDialog::ZReportDialog(QSqlDatabase &db,
                              QWidget *parent)
     : QDialog(parent), m_db(db), m_settings(settings), m_shifts(shifts)
 {
-    setWindowTitle("📊 Z-Report — End of Day");
+    setWindowTitle("Z-Report — End of Day");
     setMinimumSize(700, 650);
     setupUi();
     generateReport();
@@ -76,7 +76,7 @@ void ZReportDialog::setupUi()
     controlLayout->addWidget(m_shiftCombo);
     controlLayout->addStretch();
 
-    auto *genBtn = new QPushButton("🔄 Generate", this);
+    auto *genBtn = new QPushButton("Generate", this);
     genBtn->setProperty("kind", "info");
     connect(genBtn, &QPushButton::clicked, this, &ZReportDialog::generateReport);
     controlLayout->addWidget(genBtn);
@@ -93,16 +93,16 @@ void ZReportDialog::setupUi()
     auto *btnLayout = new QHBoxLayout();
     btnLayout->addStretch();
 
-    m_exportBtn = new QPushButton("💾 Export HTML", this);
+    m_exportBtn = new QPushButton("Export HTML", this);
     m_exportBtn->setProperty("kind", "primary");
     connect(m_exportBtn, &QPushButton::clicked, this, &ZReportDialog::exportReport);
     btnLayout->addWidget(m_exportBtn);
 
-    m_printBtn = new QPushButton("🖨 Print", this);
+    m_printBtn = new QPushButton("Print", this);
     connect(m_printBtn, &QPushButton::clicked, this, &ZReportDialog::printReport);
     btnLayout->addWidget(m_printBtn);
 
-    auto *closeBtn = new QPushButton("✖ Close", this);
+    auto *closeBtn = new QPushButton("Close", this);
     closeBtn->setProperty("kind", "danger");
     connect(closeBtn, &QPushButton::clicked, this, &QDialog::accept);
     btnLayout->addWidget(closeBtn);
@@ -264,7 +264,7 @@ tr:nth-child(even) td { background:#f5f5f5; }
 )";
 
     // Header
-    html += QString("<h1>📊 Z-Report — End of Day</h1>");
+    html += QString("<h1>Z-Report — End of Day</h1>");
     html += QString("<p><strong>Business:</strong> %1 &nbsp;|&nbsp; "
                     "<strong>Date:</strong> %2 &nbsp;|&nbsp; "
                     "<strong>Shift:</strong> %3</p>")
@@ -273,7 +273,7 @@ tr:nth-child(even) td { background:#f5f5f5; }
                 .arg(QDateTime::currentDateTime().toString("yyyy-MM-dd hh:mm:ss"));
 
     // ── Sales Summary ──────────────────────────────────────
-    html += "<h2>💰 Sales Summary</h2><div class='section'>";
+    html += "<h2>Sales Summary</h2><div class='section'>";
     auto kv = [&](const QString &label, const QString &value, const QString &cls = "") {
         return QString("<div class='kv'><span class='kv-label'>%1</span>"
                        "<span class='kv-value %3'>%2</span></div>").arg(label, value, cls);
@@ -299,7 +299,7 @@ tr:nth-child(even) td { background:#f5f5f5; }
 
     // ── Cash Reconciliation ────────────────────────────────
     if (data.openingFloat > 0 || data.closingFloat > 0) {
-        html += "<h2>💵 Cash Reconciliation</h2><div class='section'>";
+        html += "<h2>Cash Reconciliation</h2><div class='section'>";
         html += kv("Opening Float",  money(data.openingFloat));
         html += kv("Net Sales",      money(data.netSales));
         html += kv("Expected Cash",  money(data.expectedCash));
@@ -315,7 +315,7 @@ tr:nth-child(even) td { background:#f5f5f5; }
 
     // ── Sales by Category ──────────────────────────────────
     if (!data.byCategory.isEmpty()) {
-        html += "<h2>📂 Sales by Category</h2>";
+        html += "<h2>Sales by Category</h2>";
         html += "<table><tr><th>Category</th><th>Qty Sold</th><th>Sales</th><th>Share</th></tr>";
 
         for (const auto &cl : data.byCategory) {
@@ -334,7 +334,7 @@ tr:nth-child(even) td { background:#f5f5f5; }
 
     // ── Top Products ───────────────────────────────────────
     if (!data.topProducts.isEmpty()) {
-        html += "<h2>🏆 Top Products</h2>";
+        html += "<h2>Top Products</h2>";
         html += "<table><tr><th>#</th><th>Product</th><th>Qty</th><th>Sales</th></tr>";
 
         int rank = 1;

@@ -37,7 +37,7 @@ void LowStockDialog::setupUI()
     QVBoxLayout *mainLayout = new QVBoxLayout(this);
 
     // Title
-    titleLabel = new QLabel("📦 Inventory Alert - Low Stock Items", this);
+    titleLabel = new QLabel("Inventory Alert - Low Stock Items", this);
     titleLabel->setProperty("role", "chip");
     titleLabel->setProperty("kind", "danger");
     titleLabel->setProperty("textScale", "xl");
@@ -51,7 +51,7 @@ void LowStockDialog::setupUI()
     mainLayout->addWidget(summaryLabel);
 
     // Critical Stock Section
-    criticalGroupBox = new QGroupBox("🚨 Critical Stock (≤4 units)", this);
+    criticalGroupBox = new QGroupBox("Critical Stock (≤4 units)", this);
     criticalGroupBox->setProperty("kind", "danger");
 
     QVBoxLayout *criticalLayout = new QVBoxLayout(criticalGroupBox);
@@ -78,7 +78,7 @@ void LowStockDialog::setupUI()
     mainLayout->addWidget(criticalGroupBox);
 
     // Low Stock Section
-    lowStockGroupBox = new QGroupBox("⚠️ Low Stock (5-20 units)", this);
+    lowStockGroupBox = new QGroupBox("Low Stock (5-20 units)", this);
     lowStockGroupBox->setProperty("kind", "warning");
 
     QVBoxLayout *lowStockLayout = new QVBoxLayout(lowStockGroupBox);
@@ -107,12 +107,12 @@ void LowStockDialog::setupUI()
     // Button layout
     QHBoxLayout *buttonLayout = new QHBoxLayout();
 
-    refreshButton = new QPushButton("🔄 Refresh", this);
+    refreshButton = new QPushButton("Refresh", this);
     refreshButton->setProperty("kind", "info");
     connect(refreshButton, &QPushButton::clicked,
             this, &LowStockDialog::onRefreshClicked);
 
-    restockButton = new QPushButton("📦 Quick Restock", this);
+    restockButton = new QPushButton("Quick Restock", this);
     restockButton->setProperty("kind", "primary");
     connect(restockButton, &QPushButton::clicked,
             this, &LowStockDialog::onRestockClicked);
@@ -139,13 +139,13 @@ void LowStockDialog::loadInventoryData()
     // Update summary
     int totalIssues = criticalItems.size() + lowStockItems.size();
     summaryLabel->setText(
-        QString("⚠️ Total items requiring attention: %1 (%2 critical, %3 low stock)")
+        QString("Total items requiring attention: %1 (%2 critical, %3 low stock)")
             .arg(totalIssues)
             .arg(criticalItems.size())
             .arg(lowStockItems.size()));
 
     if (totalIssues == 0) {
-        summaryLabel->setText("✅ All inventory levels are healthy!");
+        summaryLabel->setText("All inventory levels are healthy!");
         setStyleProperty(summaryLabel, "kind", "success");
     } else {
         setStyleProperty(summaryLabel, "kind", "danger");
@@ -160,12 +160,12 @@ void LowStockDialog::populateCriticalTable(const QVector<InventoryInfo> &items)
     criticalTable->setRowCount(0);
 
     if (items.isEmpty()) {
-        criticalGroupBox->setTitle("🚨 Critical Stock (≤4 units) - None");
+        criticalGroupBox->setTitle("Critical Stock (≤4 units) - None");
         return;
     }
 
     criticalGroupBox->setTitle(
-        QString("🚨 Critical Stock (≤4 units) - %1 items").arg(items.size()));
+        QString("Critical Stock (≤4 units) - %1 items").arg(items.size()));
 
     for (const auto &item : items) {
         int row = criticalTable->rowCount();
@@ -212,12 +212,12 @@ void LowStockDialog::populateLowStockTable(const QVector<InventoryInfo> &items)
     lowStockTable->setRowCount(0);
 
     if (items.isEmpty()) {
-        lowStockGroupBox->setTitle("⚠️ Low Stock (5-20 units) - None");
+        lowStockGroupBox->setTitle("Low Stock (5-20 units) - None");
         return;
     }
 
     lowStockGroupBox->setTitle(
-        QString("⚠️ Low Stock (5-20 units) - %1 items").arg(items.size()));
+        QString("Low Stock (5-20 units) - %1 items").arg(items.size()));
 
     for (const auto &item : items) {
         int row = lowStockTable->rowCount();

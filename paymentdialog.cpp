@@ -71,12 +71,12 @@ void PaymentDialog::setupUI()
         return r;
     };
 
-    cashRadio = addMethodRadio("💵 Cash", "Pay with cash", 0);
+    cashRadio = addMethodRadio("Cash", "Pay with cash", 0);
     cashRadio->setChecked(true);
-    cardRadio     = addMethodRadio("💳 Credit/Debit Card", "Pay by card", 1);
-    mobileRadio   = addMethodRadio("📱 Mobile Money (M-Pesa)",
+    cardRadio     = addMethodRadio("Credit/Debit Card", "Pay by card", 1);
+    mobileRadio   = addMethodRadio("Mobile Money (M-Pesa)",
                                    "Pay with M-Pesa mobile money", 2);
-    multipleRadio = addMethodRadio("🔀 Multiple Payment Methods",
+    multipleRadio = addMethodRadio("Multiple Payment Methods",
                                    "Split across multiple payment methods", 3);
 
     mainLayout->addWidget(paymentMethodGroup);
@@ -208,7 +208,7 @@ void PaymentDialog::calculateChange()
 
     if (change < 0) {
         changeLabel->setText(
-            QString("Change: %1  ⚠ Insufficient").arg(formatMoney(Money::fromMajor(change))));
+            QString("Change: %1  Insufficient").arg(formatMoney(Money::fromMajor(change))));
         setStyleProperty(changeLabel, "kind", "danger");
     } else {
         changeLabel->setText("Change: " + formatMoney(Money::fromMajor(change)));

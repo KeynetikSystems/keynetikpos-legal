@@ -71,7 +71,7 @@ void AnalyticsDashboard::setupUI()
 
     // Header
     QHBoxLayout *headerLayout = new QHBoxLayout();
-    QLabel *titleLabel = new QLabel("📊 Sales Analytics Dashboard");
+    QLabel *titleLabel = new QLabel("Sales Analytics Dashboard");
     titleLabel->setProperty("role", "dialogTitle");
     headerLayout->addWidget(titleLabel);
     headerLayout->addStretch();
@@ -106,13 +106,13 @@ void AnalyticsDashboard::setupUI()
             this, &AnalyticsDashboard::onDateRangeChanged);
     dateLayout->addWidget(endDateEdit);
 
-    refreshBtn = new QPushButton("🔄 Refresh");
+    refreshBtn = new QPushButton("Refresh");
     refreshBtn->setProperty("kind", "primary");
     connect(refreshBtn, &QPushButton::clicked,
             this, &AnalyticsDashboard::onRefreshClicked);
     dateLayout->addWidget(refreshBtn);
 
-    exportBtn = new QPushButton("📥 Export CSV");
+    exportBtn = new QPushButton("Export CSV");
     exportBtn->setProperty("kind", "info");
     connect(exportBtn, &QPushButton::clicked,
             this, &AnalyticsDashboard::onExportClicked);
@@ -207,11 +207,11 @@ void AnalyticsDashboard::setupTabbedAnalyticsSection()
 {
     analyticsTabWidget = new QTabWidget();
     setupTopProductsSection();
-    analyticsTabWidget->addTab(topProductsWidget, "🏆 Top Products");
+    analyticsTabWidget->addTab(topProductsWidget, "Top Products");
     setupSlowMovingSection();
-    analyticsTabWidget->addTab(slowMovingWidget, "⚠️ Slow Moving");
+    analyticsTabWidget->addTab(slowMovingWidget, "Slow Moving");
     setupHourlySalesSection();
-    analyticsTabWidget->addTab(hourlySalesWidget, "🕐 Hourly Sales");
+    analyticsTabWidget->addTab(hourlySalesWidget, "Hourly Sales");
 }
 
 void AnalyticsDashboard::setupTopProductsSection()
@@ -443,9 +443,9 @@ void AnalyticsDashboard::updateTopProductsTable(
     for (int i = 0; i < products.size(); ++i) {
         const ProductPerformance &p = products[i];
         QString rank = QString::number(i + 1);
-        if      (i == 0) rank = "🥇 1";
-        else if (i == 1) rank = "🥈 2";
-        else if (i == 2) rank = "🥉 3";
+        if      (i == 0) rank = "1";
+        else if (i == 1) rank = "2";
+        else if (i == 2) rank = "3";
 
         QTableWidgetItem *ri = new QTableWidgetItem(rank);
         ri->setTextAlignment(Qt::AlignCenter);

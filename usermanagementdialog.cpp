@@ -60,7 +60,7 @@ void UserManagementDialog::setupUI() {
     filterLayout->setContentsMargins(0, 0, 0, 0);
 
     searchEdit = new QLineEdit();
-    searchEdit->setPlaceholderText("🔍 Search users...");
+    searchEdit->setPlaceholderText("Search users...");
     searchEdit->setMinimumWidth(300);
     filterLayout->addWidget(searchEdit);
 
@@ -104,13 +104,13 @@ void UserManagementDialog::setupUI() {
     QHBoxLayout *buttonLayout = new QHBoxLayout();
     buttonLayout->setSpacing(10);
 
-    addButton = new QPushButton("➕ Add User");
-    editButton = new QPushButton("✏️ Edit User");
-    deleteButton = new QPushButton("🗑️ Delete User");
-    toggleStatusButton = new QPushButton("🔄 Toggle Status");
-    changePasswordButton = new QPushButton("🔑 Change Password");
-    viewPermissionsButton = new QPushButton("👁️ View Permissions");
-    refreshButton = new QPushButton("🔄 Refresh");
+    addButton = new QPushButton("Add User");
+    editButton = new QPushButton("Edit User");
+    deleteButton = new QPushButton("Delete User");
+    toggleStatusButton = new QPushButton("Toggle Status");
+    changePasswordButton = new QPushButton("Change Password");
+    viewPermissionsButton = new QPushButton("View Permissions");
+    refreshButton = new QPushButton("Refresh");
 
     addButton->setProperty("kind", "primary");
     deleteButton->setProperty("kind", "danger");
@@ -190,7 +190,7 @@ void UserManagementDialog::filterUsers() {
         userTable->setItem(row, 2, new QTableWidgetItem(user.fullName));
         userTable->setItem(row, 3, new QTableWidgetItem(user.email));
         userTable->setItem(row, 4, new QTableWidgetItem(RoleManager::roleToString(user.role)));
-        userTable->setItem(row, 5, new QTableWidgetItem(user.isActive ? "✓ Active" : "✗ Inactive"));
+        userTable->setItem(row, 5, new QTableWidgetItem(user.isActive ? "Active" : "Inactive"));
         userTable->setItem(row, 6, new QTableWidgetItem(
                                        user.lastLogin.isValid() ? user.lastLogin.toString("yyyy-MM-dd hh:mm") : "Never"));
 
@@ -421,8 +421,8 @@ void UserDialog::setupUI() {
     mainLayout->addStretch();
 
     QHBoxLayout *buttonLayout = new QHBoxLayout();
-    QPushButton *saveButton   = new QPushButton(editMode ? "💾 Update User" : "➕ Create User");
-    QPushButton *cancelButton = new QPushButton("✖ Cancel");
+    QPushButton *saveButton   = new QPushButton(editMode ? "Update User" : "Create User");
+    QPushButton *cancelButton = new QPushButton("Cancel");
 
     saveButton->setProperty("kind", "primary");
     saveButton->setMinimumWidth(140);
@@ -574,7 +574,7 @@ void PermissionsViewDialog::loadPermissions() {
         QString permName = RoleManager::getPermissionDescription(permissions[i]);
         permissionsTable->setItem(i, 0, new QTableWidgetItem(permName));
 
-        QTableWidgetItem *accessItem = new QTableWidgetItem("✓ Granted");
+        QTableWidgetItem *accessItem = new QTableWidgetItem("Granted");
         accessItem->setForeground(QBrush(QColor(getColorScheme().success)));
         QFont font = accessItem->font();
         font.setBold(true);

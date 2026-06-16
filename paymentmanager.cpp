@@ -227,18 +227,10 @@ QString PaymentManager::paymentMethodName(PaymentMethod method)
     }
 }
 
-QString PaymentManager::paymentMethodIcon(PaymentMethod method)
+QString PaymentManager::paymentMethodIcon(PaymentMethod /*method*/)
 {
-    switch (method) {
-    case PaymentMethod::Cash: return "💵";
-    case PaymentMethod::Card: return "💳";
-    case PaymentMethod::MobileMoney: return "📱";
-    case PaymentMethod::BankTransfer: return "🏦";
-    case PaymentMethod::Check: return "📝";
-    case PaymentMethod::GiftCard: return "🎁";
-    case PaymentMethod::StoreCredit: return "🎫";
-    default: return "💰";
-    }
+    // Icons removed from the UI; kept as a no-op for API compatibility.
+    return QString();
 }
 
 QColor PaymentManager::paymentMethodColor(PaymentMethod method)

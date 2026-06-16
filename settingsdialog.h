@@ -1,4 +1,4 @@
-﻿// =============================================================================
+// =============================================================================
 // settingsdialog.h — SettingsDialog: tabbed editor for all configuration
 // -----------------------------------------------------------------------------
 // WHAT: Tabs for Business, Tax, Receipt, Security (discount PIN + require-PIN

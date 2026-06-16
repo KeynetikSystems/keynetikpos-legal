@@ -26,7 +26,7 @@ ScheduleEditorDialog::ScheduleEditorDialog(ScheduleManager *manager,
     , m_scheduleId(scheduleId)
 {
     bool isEdit = (scheduleId >= 0);
-    setWindowTitle(isEdit ? "✏️ Edit Schedule" : "➕ Add Schedule");
+    setWindowTitle(isEdit ? "Edit Schedule" : "Add Schedule");
     resize(600, 700);
 
     setupUi();
@@ -45,7 +45,7 @@ void ScheduleEditorDialog::setupUi()
     mainLayout->setContentsMargins(15, 15, 15, 15);
 
     // Basic Info Group
-    auto *basicGroup = new QGroupBox("📋 Basic Information", this);
+    auto *basicGroup = new QGroupBox("Basic Information", this);
     auto *basicLayout = new QFormLayout(basicGroup);
 
     m_nameEdit = new QLineEdit(this);
@@ -53,28 +53,28 @@ void ScheduleEditorDialog::setupUi()
     basicLayout->addRow("Schedule Name*:", m_nameEdit);
 
     m_typeCombo = new QComboBox(this);
-    m_typeCombo->addItem("📅 Daily", MessageSchedule::Daily);
-    m_typeCombo->addItem("📆 Weekly", MessageSchedule::Weekly);
-    m_typeCombo->addItem("📊 Monthly", MessageSchedule::Monthly);
-    m_typeCombo->addItem("🔚 On Shift Close", MessageSchedule::OnShiftClose);
-    m_typeCombo->addItem("💰 On Sales Threshold", MessageSchedule::OnSalesThreshold);
-    m_typeCombo->addItem("⚙️ Custom", MessageSchedule::Custom);
+    m_typeCombo->addItem("Daily", MessageSchedule::Daily);
+    m_typeCombo->addItem("Weekly", MessageSchedule::Weekly);
+    m_typeCombo->addItem("Monthly", MessageSchedule::Monthly);
+    m_typeCombo->addItem("On Shift Close", MessageSchedule::OnShiftClose);
+    m_typeCombo->addItem("On Sales Threshold", MessageSchedule::OnSalesThreshold);
+    m_typeCombo->addItem("Custom", MessageSchedule::Custom);
     connect(m_typeCombo, QOverload<int>::of(&QComboBox::currentIndexChanged),
             this, &ScheduleEditorDialog::onScheduleTypeChanged);
     basicLayout->addRow("Schedule Type*:", m_typeCombo);
 
     m_reportTypeCombo = new QComboBox(this);
-    m_reportTypeCombo->addItem("📊 Z-Report", MessageSchedule::ZReport);
-    m_reportTypeCombo->addItem("📈 X-Report", MessageSchedule::XReport);
-    m_reportTypeCombo->addItem("📦 Inventory Alert", MessageSchedule::InventoryAlert);
-    m_reportTypeCombo->addItem("💵 Sales Summary", MessageSchedule::SalesSummary);
-    m_reportTypeCombo->addItem("📄 Custom Report", MessageSchedule::CustomReport);
+    m_reportTypeCombo->addItem("Z-Report", MessageSchedule::ZReport);
+    m_reportTypeCombo->addItem("X-Report", MessageSchedule::XReport);
+    m_reportTypeCombo->addItem("Inventory Alert", MessageSchedule::InventoryAlert);
+    m_reportTypeCombo->addItem("Sales Summary", MessageSchedule::SalesSummary);
+    m_reportTypeCombo->addItem("Custom Report", MessageSchedule::CustomReport);
     basicLayout->addRow("Report Type*:", m_reportTypeCombo);
 
     mainLayout->addWidget(basicGroup);
 
     // Time Settings Group
-    auto *timeGroup = new QGroupBox("⏰ Time Settings", this);
+    auto *timeGroup = new QGroupBox("Time Settings", this);
     auto *timeLayout = new QFormLayout(timeGroup);
 
     m_timeEdit = new QTimeEdit(QTime(23, 0), this);
@@ -99,7 +99,7 @@ void ScheduleEditorDialog::setupUi()
     mainLayout->addWidget(timeGroup);
 
     // Event Settings Group
-    auto *eventGroup = new QGroupBox("🎯 Event Settings", this);
+    auto *eventGroup = new QGroupBox("Event Settings", this);
     auto *eventLayout = new QFormLayout(eventGroup);
 
     m_thresholdSpin = new QDoubleSpinBox(this);
@@ -112,14 +112,14 @@ void ScheduleEditorDialog::setupUi()
     mainLayout->addWidget(eventGroup);
 
     // Provider & Recipients Group
-    auto *providerGroup = new QGroupBox("📱 Provider & Recipients", this);
+    auto *providerGroup = new QGroupBox("Provider & Recipients", this);
     auto *providerLayout = new QFormLayout(providerGroup);
 
     m_providerCombo = new QComboBox(this);
     // Populate with available providers
     QStringList providers = m_manager->getAvailableProviders();
     if (providers.isEmpty()) {
-        m_providerCombo->addItem("⚠️ No providers configured");
+        m_providerCombo->addItem("No providers configured");
         m_providerCombo->setEnabled(false);
     } else {
         m_providerCombo->addItems(providers);
@@ -136,7 +136,7 @@ void ScheduleEditorDialog::setupUi()
     providerLayout->addRow("Recipients*:", m_recipientsEdit);
 
     auto *recipientHint = new QLabel(
-        "💡 Tip: Include country code for phone numbers (+254 for Kenya)", this);
+        "Tip: Include country code for phone numbers (+254 for Kenya)", this);
     recipientHint->setWordWrap(true);
     recipientHint->setProperty("kind", "secondary");
     recipientHint->setStyleSheet("font-size:10px;");
@@ -145,7 +145,7 @@ void ScheduleEditorDialog::setupUi()
     mainLayout->addWidget(providerGroup);
 
     // Notes Group
-    auto *notesGroup = new QGroupBox("📝 Notes", this);
+    auto *notesGroup = new QGroupBox("Notes", this);
     auto *notesLayout = new QVBoxLayout(notesGroup);
 
     m_notesEdit = new QTextEdit(this);
@@ -156,7 +156,7 @@ void ScheduleEditorDialog::setupUi()
     mainLayout->addWidget(notesGroup);
 
     // Status
-    m_activeCheck = new QCheckBox("✅ Schedule is Active", this);
+    m_activeCheck = new QCheckBox("Schedule is Active", this);
     m_activeCheck->setChecked(true);
     m_activeCheck->setProperty("bold", "true");
     mainLayout->addWidget(m_activeCheck);
@@ -166,7 +166,7 @@ void ScheduleEditorDialog::setupUi()
     // Buttons
     auto *buttonLayout = new QHBoxLayout;
 
-    m_saveBtn = new QPushButton(m_scheduleId >= 0 ? "💾 Save Changes" : "➕ Create Schedule", this);
+    m_saveBtn = new QPushButton(m_scheduleId >= 0 ? "Save Changes" : "Create Schedule", this);
     m_saveBtn->setProperty("kind", "primary");
     connect(m_saveBtn, &QPushButton::clicked, this, &ScheduleEditorDialog::validate);
     buttonLayout->addWidget(m_saveBtn);
@@ -281,7 +281,7 @@ void ScheduleEditorDialog::validate()
     }
 
     // Validate provider
-    if (m_providerCombo->currentText().startsWith("⚠️")) {
+    if (m_providerCombo->currentText().startsWith("No providers configured")) {
         QMessageBox::warning(this, "Validation Error",
                              "No messaging providers are configured.\n\n"
                              "Please configure a provider (WhatsApp, SMS, etc.) first.");
