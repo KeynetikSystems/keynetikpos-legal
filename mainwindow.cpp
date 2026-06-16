@@ -164,12 +164,10 @@ MainWindow::MainWindow(QWidget *parent)
     checkoutService = new CheckoutService(inventoryManager, receiptPrinter);
 
     // ── Theme ───────────────────────────────────────────────────────────────
-    isDarkMode = ThemeManager::instance().isDark();
+    // Any theme change (from this window's menu or elsewhere) restyles the
+    // whole app and re-syncs the menu checkmark via applyTheme().
     connect(&ThemeManager::instance(), &ThemeManager::themeChanged,
-            this, [this](bool dark) {
-                isDarkMode = dark;
-                applyTheme();
-            });
+            this, [this](bool) { applyTheme(); });
 
     setWindowTitle("KeynetikPOS - Point of Sale System");
     resize(1400, 900);
@@ -179,6 +177,10 @@ MainWindow::MainWindow(QWidget *parent)
 
     // ── Build UI ─────────────────────────────────────────────────────────────
     setupUI();
+
+    // Sync the Theme menu's checkmark with the persisted theme (already applied
+    // app-wide in main()).
+    applyTheme();
 
     // Cart state changes drive the UI from here on
     connect(cartService, &CartService::currentCartChanged,
@@ -507,8 +509,24 @@ void MainWindow::setupMenuBar()
     connect(settingsMenu->addAction("Backup Now"),
             &QAction::triggered, this, &MainWindow::onBackupNow);
     settingsMenu->addSeparator();
-    themeAction = settingsMenu->addAction("Toggle Dark Mode");
-    connect(themeAction, &QAction::triggered, this, &MainWindow::onToggleTheme);
+
+    // Theme submenu — one checkable entry per AppTheme. Selecting one routes
+    // through ThemeManager (single source of truth), which persists the choice
+    // and emits themeChanged() so this window and every open dialog restyle.
+    QMenu *themeMenu = settingsMenu->addMenu("Theme");
+    themeGroup = new QActionGroup(this);
+    themeGroup->setExclusive(true);
+    const AppTheme themes[] = { AppTheme::Light, AppTheme::Dark, AppTheme::Classic,
+                                AppTheme::Native, AppTheme::Silver };
+    for (AppTheme t : themes) {
+        QAction *a = themeMenu->addAction(appThemeName(t));
+        a->setCheckable(true);
+        a->setData(static_cast<int>(t));
+        themeGroup->addAction(a);
+    }
+    connect(themeGroup, &QActionGroup::triggered, this, [](QAction *a) {
+        ThemeManager::instance().setTheme(static_cast<AppTheme>(a->data().toInt()));
+    });
 
     // Help
     QMenu *helpMenu = mb->addMenu("Help");
@@ -1612,23 +1630,21 @@ void MainWindow::onBackupNow()
     }
 }
 
-void MainWindow::onToggleTheme()
-{
-    // ThemeManager is the single source of truth: it persists the choice and
-    // emits themeChanged(), which restyles this window AND every open dialog
-    // (InventoryDialog, AnalyticsDashboard, ...) that listens to it.
-    ThemeManager::instance().toggle();
-}
-
 void MainWindow::applyTheme()
 {
-    // Application-wide: dialogs (including parentless ones) inherit the sheet.
-    qApp->setStyleSheet(appStylesheet(isDarkMode));
-    QApplication::setPalette(appPalette(isDarkMode));
-    themeAction->setText(isDarkMode ? "Toggle Light Mode"
-                                    : "Toggle Dark Mode");
-    statusLabel->setText(isDarkMode ? "Dark mode enabled"
-                                    : "Light mode enabled");
+    const AppTheme theme = ThemeManager::instance().theme();
+
+    // Application-wide: sets the base Qt style, palette and stylesheet on qApp,
+    // so dialogs (including parentless ones) inherit the look.
+    applyAppTheme(theme);
+
+    // Keep the menu's checkmark in sync (covers programmatic changes too).
+    if (themeGroup) {
+        for (QAction *a : themeGroup->actions())
+            if (a->data().toInt() == static_cast<int>(theme)) { a->setChecked(true); break; }
+    }
+    if (statusLabel)
+        statusLabel->setText("Theme: " + appThemeName(theme));
 }
 
 // =============================================================================

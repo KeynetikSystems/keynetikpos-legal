@@ -31,23 +31,41 @@ ThemeManager& ThemeManager::instance()
 ThemeManager::ThemeManager()
 {
     QSettings settings("KeynetikPOS", "MainWindow");
-    m_isDark = settings.value("theme/darkMode", false).toBool();
+    // Prefer the named theme; fall back to the legacy darkMode bool so existing
+    // installs keep their choice.
+    if (settings.contains("theme/name")) {
+        int v = settings.value("theme/name").toInt();
+        if (v < 0 || v > static_cast<int>(AppTheme::Silver))
+            v = static_cast<int>(AppTheme::Light);
+        m_theme = static_cast<AppTheme>(v);
+    } else {
+        m_theme = settings.value("theme/darkMode", false).toBool()
+                      ? AppTheme::Dark : AppTheme::Light;
+    }
     buildScheme();
 }
 
-void ThemeManager::setDark(bool dark)
+void ThemeManager::setTheme(AppTheme t)
 {
-    if (m_isDark == dark) return;
-    m_isDark = dark;
+    if (m_theme == t) return;
+    m_theme = t;
     buildScheme();
 
     QSettings settings("KeynetikPOS", "MainWindow");
-    settings.setValue("theme/darkMode", dark);
+    settings.setValue("theme/name", static_cast<int>(t));
+    settings.setValue("theme/darkMode", isDark());   // keep legacy key in sync
 
-    emit themeChanged(dark);
+    emit themeChanged(isDark());
 }
 
 void ThemeManager::buildScheme()
 {
-    m_scheme = m_isDark ? getDarkColorScheme() : getLightColorScheme();
+    switch (m_theme) {
+    case AppTheme::Dark:    m_scheme = getDarkColorScheme();    break;
+    case AppTheme::Classic: m_scheme = getClassicColorScheme(); break;
+    case AppTheme::Silver:  m_scheme = getSilverColorScheme();  break;
+    case AppTheme::Native:  // native widgets render themselves; the scheme is
+    case AppTheme::Light:   // only used for cell-highlight brushes etc.
+    default:                m_scheme = getLightColorScheme();   break;
+    }
 }

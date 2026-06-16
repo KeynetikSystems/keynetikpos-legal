@@ -1,26 +1,45 @@
 // =============================================================================
-// appstyle.cpp — Implementation of appStylesheet()/appPalette() (see
-// appstyle.h for the full WHAT/HOW/WHY).
+// appstyle.cpp — Implementation of the theme stylesheets/palette (see appstyle.h).
 // -----------------------------------------------------------------------------
 // Implementation notes:
-//  - Every colour comes from ColorScheme (colorscheme.h) — there are no
-//    hard-coded hex values here, so light/dark can never drift apart.
-//  - Table rules target QTableView (not QTableWidget) so they style both the
-//    model/view cart table and the QTableWidget-based dialog tables —
-//    stylesheet class selectors match subclasses.
-//  - Hover/pressed shades for the semantic buttons are derived with
-//    QColor::darker() instead of being stored as extra palette fields.
+//  - The sheet is built in two parts: CHROME (window/inputs/buttons/tables/tabs)
+//    and SEMANTIC (role/kind/textScale labels, banners, chips, coloured action
+//    buttons). Semantic rules apply to every theme; chrome varies:
+//      Light/Dark/Classic -> flat chrome (Classic squares the corners)
+//      Silver             -> glossy gradient chrome
+//      Native             -> no chrome at all, so the OS style renders controls
+//  - Colours come from ColorScheme; the glossy chrome derives gradient stops
+//    with QColor::lighter()/darker() so it tracks the silver palette.
 // =============================================================================
 #include "appstyle.h"
 #include "colorscheme.h"
 
 #include <QColor>
+#include <QApplication>
+#include <QStyle>
+#include <QStyleFactory>
 
 namespace {
 
-QString darker(const QString &hex, int factor)
+ColorScheme schemeFor(AppTheme t)
 {
-    return QColor(hex).darker(factor).name();
+    switch (t) {
+    case AppTheme::Dark:    return getDarkColorScheme();
+    case AppTheme::Classic: return getClassicColorScheme();
+    case AppTheme::Silver:  return getSilverColorScheme();
+    case AppTheme::Native:
+    case AppTheme::Light:
+    default:                return getLightColorScheme();
+    }
+}
+
+QString darker(const QString &hex, int factor)  { return QColor(hex).darker(factor).name(); }
+QString lighter(const QString &hex, int factor) { return QColor(hex).lighter(factor).name(); }
+
+QString vgrad(const QString &top, const QString &bottom)
+{
+    return QString("qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 %1, stop:1 %2)")
+        .arg(top, bottom);
 }
 
 // One block per semantic button/label kind: solid fill, white text,
@@ -39,28 +58,24 @@ QString kindBlock(const QString &kind, const QString &color,
              disabledBg, disabledText);
 }
 
-} // namespace
-
-QString appStylesheet(bool dark)
+// Flat widget chrome (Light / Dark / Classic). Radii come from %rad% tokens so
+// Classic can square the corners. Colours are %tokens% replaced by the caller.
+QString flatChrome()
 {
-    const ColorScheme s = dark ? getDarkColorScheme() : getLightColorScheme();
-
-    QString sheet = QString(R"(
+    return QString(R"(
         QMainWindow { background-color: %bgPrimary%; }
         QDialog     { background-color: %bgPrimary%; }
-        /* No QWidget background rule: plain containers stay transparent and
-           inherit their parent's surface; only real surfaces paint. */
         QWidget     { color: %text%; }
 
         QGroupBox { background-color: %bgSecondary%; border: 2px solid %border%;
-            border-radius: 8px; margin-top: 12px; padding: 15px;
+            border-radius: %radGroup%; margin-top: 12px; padding: 15px;
             font-weight: bold; color: %text%; }
         QGroupBox::title { subcontrol-origin: margin; left: 10px; padding: 0 5px; }
 
         QLineEdit, QComboBox, QSpinBox, QDoubleSpinBox,
         QDateEdit, QTimeEdit, QDateTimeEdit {
             background-color: %inputBg%; border: 2px solid %border%;
-            border-radius: 5px; padding: 6px; color: %text%; font-size: 11pt; }
+            border-radius: %rad%; padding: 6px; color: %text%; font-size: 11pt; }
         QLineEdit:focus, QComboBox:focus, QSpinBox:focus, QDoubleSpinBox:focus,
         QDateEdit:focus, QTimeEdit:focus, QDateTimeEdit:focus {
             border: 2px solid %focus%; }
@@ -70,7 +85,7 @@ QString appStylesheet(bool dark)
 
         QTableView { background-color: %inputBg%; alternate-background-color: %bgSecondary%;
             gridline-color: %border%; border: 1px solid %border%;
-            border-radius: 5px; color: %text%; }
+            border-radius: %rad%; color: %text%; }
         QTableView::item { padding: 8px; }
         QTableView::item:selected { background-color: %accent%; color: white; }
         QHeaderView::section { background-color: %bgSecondary%; color: %text%;
@@ -78,7 +93,7 @@ QString appStylesheet(bool dark)
             border-bottom: 2px solid %accent%; font-weight: bold; }
 
         QPushButton { background-color: %bgSecondary%; color: %text%;
-            border: 1px solid %border%; border-radius: 5px;
+            border: 1px solid %border%; border-radius: %rad%;
             padding: 10px; font-size: 11pt; }
         QPushButton:hover    { background-color: %hover%; }
         QPushButton:pressed  { background-color: %active%; }
@@ -96,12 +111,11 @@ QString appStylesheet(bool dark)
         QStatusBar { background-color: %bgSecondary%; color: %text%;
             border-top: 1px solid %border%; }
 
-        QLabel { color: %text%; background: transparent; }
         QLabel[kind="secondary"] { color: %textSecondary%; }
 
         QTabWidget::pane { border: none; background-color: %bgPrimary%; }
         QTabBar::tab { background: %bgSecondary%; border: 2px solid %border%;
-            border-top-left-radius: 6px; border-top-right-radius: 6px;
+            border-top-left-radius: %radTab%; border-top-right-radius: %radTab%;
             min-width: 120px; padding: 8px 15px; margin-right: 2px;
             font-weight: 600; font-size: 10pt; color: %text%; }
         QTabBar::tab:selected { background: %bgPrimary%; border-color: %accent%;
@@ -109,6 +123,102 @@ QString appStylesheet(bool dark)
         QTabBar::tab:hover:!selected { background: %hover%; }
 
         QScrollArea { border: none; }
+    )");
+}
+
+// Glossy "brushed metal" chrome for the Silver theme: vertical gradients on
+// surfaces, raised bevels on buttons/tabs. Colours embedded directly (derived
+// from the silver scheme) rather than via %tokens%.
+QString glossyChrome(const ColorScheme &s)
+{
+    const QString edge   = s.borderColor;
+    const QString panel  = vgrad(lighter(s.bgPrimary, 108), s.bgPrimary);
+    const QString raised = vgrad(lighter(s.bgSecondary, 104), darker(s.bgSecondary, 108));
+    const QString btn    = vgrad("#ffffff", darker(s.bgSecondary, 112));
+    const QString btnHi  = vgrad("#ffffff", s.bgSecondary);
+    const QString btnDn  = vgrad(darker(s.bgSecondary, 112), "#ffffff");
+    const QString header = vgrad(lighter(s.bgPrimary, 112), darker(s.bgPrimary, 106));
+
+    return QString(R"(
+        QMainWindow { background: %PANEL%; }
+        QDialog     { background: %PANEL%; }
+        QWidget     { color: %TEXT%; }
+
+        QGroupBox { background: %RAISED%; border: 1px solid %EDGE%;
+            border-radius: 7px; margin-top: 12px; padding: 15px;
+            font-weight: bold; color: %TEXT%; }
+        QGroupBox::title { subcontrol-origin: margin; left: 10px; padding: 0 5px; }
+
+        QLineEdit, QComboBox, QSpinBox, QDoubleSpinBox,
+        QDateEdit, QTimeEdit, QDateTimeEdit {
+            background: #ffffff; border: 1px solid %EDGE%; border-radius: 4px;
+            padding: 6px; color: %TEXT%; font-size: 11pt; }
+        QLineEdit:focus, QComboBox:focus, QSpinBox:focus, QDoubleSpinBox:focus {
+            border: 1px solid %FOCUS%; }
+        QComboBox::drop-down { border: none; width: 20px; }
+        QComboBox QAbstractItemView { background: #ffffff; color: %TEXT%;
+            selection-background-color: %ACCENT%; selection-color: white; }
+
+        QTableView { background: #ffffff; alternate-background-color: %ALT%;
+            gridline-color: %EDGE%; border: 1px solid %EDGE%; border-radius: 4px;
+            color: %TEXT%; }
+        QTableView::item { padding: 8px; }
+        QTableView::item:selected { background: %ACCENT%; color: white; }
+        QHeaderView::section { background: %HEADER%; color: %TEXT%; padding: 8px;
+            border: none; border-right: 1px solid %EDGE%;
+            border-bottom: 1px solid %EDGE%; font-weight: bold; }
+
+        QPushButton { background: %BTN%; color: %TEXT%; border: 1px solid %EDGE%;
+            border-radius: 6px; padding: 10px; font-size: 11pt; }
+        QPushButton:hover    { background: %BTNHI%; }
+        QPushButton:pressed  { background: %BTNDN%; }
+        QPushButton:disabled { background: %DISABLED%; color: %DISABLEDTEXT%; }
+
+        QCheckBox, QRadioButton { color: %TEXT%; }
+
+        QMenuBar { background: %HEADER%; color: %TEXT%; border-bottom: 1px solid %EDGE%; }
+        QMenuBar::item { background: transparent; padding: 8px 12px; }
+        QMenuBar::item:selected { background: %ACCENT%; color: white; border-radius: 4px; }
+        QMenu { background: %RAISED%; color: %TEXT%; border: 1px solid %EDGE%; }
+        QMenu::item:selected { background: %ACCENT%; color: white; }
+
+        QStatusBar { background: %HEADER%; color: %TEXT%; border-top: 1px solid %EDGE%; }
+
+        QLabel[kind="secondary"] { color: %TEXTSECONDARY%; }
+
+        QTabWidget::pane { border: 1px solid %EDGE%; border-radius: 4px; background: %RAISED%; }
+        QTabBar::tab { background: %BTN%; border: 1px solid %EDGE%;
+            border-top-left-radius: 6px; border-top-right-radius: 6px;
+            min-width: 110px; padding: 8px 15px; margin-right: 2px;
+            font-weight: 600; font-size: 10pt; color: %TEXT%; }
+        QTabBar::tab:selected { background: %BTNHI%; }
+        QTabBar::tab:hover:!selected { background: %BTNHI%; }
+
+        QScrollArea { border: none; }
+    )")
+        .replace("%PANEL%", panel)
+        .replace("%RAISED%", raised)
+        .replace("%BTN%", btn)
+        .replace("%BTNHI%", btnHi)
+        .replace("%BTNDN%", btnDn)
+        .replace("%HEADER%", header)
+        .replace("%EDGE%", edge)
+        .replace("%ALT%", s.bgSecondary)
+        .replace("%FOCUS%", s.inputFocusBorder)
+        .replace("%ACCENT%", s.accentPrimary)
+        .replace("%DISABLEDTEXT%", s.disabledText)
+        .replace("%DISABLED%", s.disabledBg)
+        .replace("%TEXTSECONDARY%", s.textSecondary)
+        .replace("%TEXT%", s.textPrimary);
+}
+
+// Semantic rules (role/kind/textScale, banners, chips, titles, separators,
+// stat-card values). Applied to EVERY theme so the app's structure reads the
+// same even under the Native style. Uses %tokens%.
+QString semanticPart()
+{
+    return QString(R"(
+        QLabel { background: transparent; }
 
         /* Product grid (MainWindow) — cards paint themselves in the delegate */
         QListView#productGrid { background-color: transparent; border: none; }
@@ -120,8 +230,7 @@ QString appStylesheet(bool dark)
         QLabel[role="amountTotal"]    { font-size: 20pt; font-weight: bold; color: %success%; }
 
         /* ── Status banners (combine with kind for colour) ────────────── */
-        QLabel[role="banner"] { padding: 10px; border-radius: 5px;
-            font-weight: bold; }
+        QLabel[role="banner"] { padding: 10px; border-radius: 5px; font-weight: bold; }
         QLabel[role="banner"][kind="success"] { background-color: %successBg%;
             border: 1px solid %successBorder%; color: %success%; }
         QLabel[role="banner"][kind="danger"]  { background-color: %errorBg%;
@@ -157,11 +266,7 @@ QString appStylesheet(bool dark)
         /* ── Horizontal separator lines ───────────────────────────────── */
         QFrame[role="hline"] { color: %border%; }
 
-        /* ── Reusable type-scale (theme-independent sizing) ───────────────
-           Opt in with setProperty("textScale", "sm|md|lg|xl|2xl") instead of
-           inline `setStyleSheet("font-size: …")`. The attribute selector
-           outranks the bare-type base rules (e.g. QLineEdit 11pt), so it works
-           on labels, radios, spin boxes and line edits alike. */
+        /* ── Reusable type-scale (theme-independent sizing) ───────────── */
         QWidget[textScale="sm"]  { font-size: 10pt; }
         QWidget[textScale="md"]  { font-size: 12pt; }
         QWidget[textScale="lg"]  { font-size: 14pt; }
@@ -172,55 +277,71 @@ QString appStylesheet(bool dark)
         QWidget[bold="true"] { font-weight: bold; }
 
         /* ── One-off widgets ──────────────────────────────────────────── */
-        QStatusBar QPushButton { padding: 5px 15px; border-radius: 3px;
-            font-size: 10pt; }
+        QStatusBar QPushButton { padding: 5px 15px; border-radius: 3px; font-size: 10pt; }
         QPushButton#checkoutButton { font-size: 16pt; }
         QPushButton#newCartButton  { font-size: 13pt; padding: 8px 16px; }
         QLabel#currentUserLabel    { font-weight: bold; padding: 5px; }
         QLabel#summaryValue        { font-size: 24pt; font-weight: bold; padding: 4px; }
         QLabel#summaryDescription  { color: %textSecondary%; font-weight: bold; padding: 2px; }
     )");
+}
 
-    sheet.replace("%bgPrimary%",    s.bgPrimary);
-    sheet.replace("%bgSecondary%",  s.bgSecondary);
-    sheet.replace("%text%",         s.textPrimary);
-    sheet.replace("%textSecondary%",s.textSecondary);
-    sheet.replace("%border%",       s.borderColor);
-    sheet.replace("%inputBg%",      s.inputBg);
-    sheet.replace("%focus%",        s.inputFocusBorder);
-    sheet.replace("%accent%",       s.accentPrimary);
+} // namespace
+
+QString appStylesheet(AppTheme theme)
+{
+    const ColorScheme s = schemeFor(theme);
+
+    QString sheet;
+    if (theme == AppTheme::Silver)
+        sheet = glossyChrome(s);
+    else if (theme != AppTheme::Native)   // Native: no chrome — let the OS style render
+        sheet = flatChrome();
+    sheet += semanticPart();
+
+    // Corner radii — Classic squares them off for the WinForms look.
+    const bool squared = (theme == AppTheme::Classic);
+    sheet.replace("%radGroup%", squared ? "2px" : "8px");
+    sheet.replace("%radTab%",   squared ? "2px" : "6px");
+    sheet.replace("%rad%",      squared ? "2px" : "5px");
+
+    sheet.replace("%bgPrimary%",       s.bgPrimary);
+    sheet.replace("%bgSecondary%",     s.bgSecondary);
+    sheet.replace("%text%",            s.textPrimary);
+    sheet.replace("%textSecondary%",   s.textSecondary);
+    sheet.replace("%border%",          s.borderColor);
+    sheet.replace("%inputBg%",         s.inputBg);
+    sheet.replace("%focus%",           s.inputFocusBorder);
     sheet.replace("%accentSecondary%", s.accentSecondary);
     sheet.replace("%accentTertiary%",  s.accentTertiary);
-    sheet.replace("%infoBg%",       s.infoBg);
-    sheet.replace("%hover%",        s.hoverColor);
-    sheet.replace("%active%",       s.activeColor);
-    sheet.replace("%disabledBg%",   s.disabledBg);
-    sheet.replace("%disabledText%", s.disabledText);
-    sheet.replace("%success%",      s.success);
-    sheet.replace("%successBg%",    s.successBg);
-    sheet.replace("%successBorder%",s.successBorder);
-    sheet.replace("%warning%",      s.warning);
-    sheet.replace("%warningBg%",    s.warningBg);
-    sheet.replace("%error%",        s.error);
-    sheet.replace("%errorBg%",      s.errorBg);
-    sheet.replace("%errorBorder%",  s.errorBorder);
+    sheet.replace("%accent%",          s.accentPrimary);
+    sheet.replace("%infoBg%",          s.infoBg);
+    sheet.replace("%hover%",           s.hoverColor);
+    sheet.replace("%active%",          s.activeColor);
+    sheet.replace("%disabledBg%",      s.disabledBg);
+    sheet.replace("%disabledText%",    s.disabledText);
+    sheet.replace("%successBg%",       s.successBg);
+    sheet.replace("%successBorder%",   s.successBorder);
+    sheet.replace("%success%",         s.success);
+    sheet.replace("%warningBg%",       s.warningBg);
+    sheet.replace("%warning%",         s.warning);
+    sheet.replace("%errorBg%",         s.errorBg);
+    sheet.replace("%errorBorder%",     s.errorBorder);
+    sheet.replace("%error%",           s.error);
 
     sheet += kindBlock("primary", s.accentPrimary,   s.disabledBg, s.disabledText);
     sheet += kindBlock("danger",  s.error,           s.disabledBg, s.disabledText);
     sheet += kindBlock("warning", s.warning,         s.disabledBg, s.disabledText);
     sheet += kindBlock("info",    s.accentSecondary, s.disabledBg, s.disabledText);
     sheet += kindBlock("tertiary",s.accentTertiary,  s.disabledBg, s.disabledText);
-
-    // Coloured text labels (kindBlock already emits QLabel[kind=...] rules for
-    // primary/danger/warning/info; add the success text variant).
     sheet += QString("QLabel[kind=\"success\"] { color: %1; }").arg(s.success);
 
     return sheet;
 }
 
-QPalette appPalette(bool dark)
+QPalette appPalette(AppTheme theme)
 {
-    const ColorScheme s = dark ? getDarkColorScheme() : getLightColorScheme();
+    const ColorScheme s = schemeFor(theme);
 
     QPalette pal;
     pal.setColor(QPalette::Window,          QColor(s.bgPrimary));
@@ -236,4 +357,31 @@ QPalette appPalette(bool dark)
     pal.setColor(QPalette::ToolTipBase,     QColor(s.bgSecondary));
     pal.setColor(QPalette::ToolTipText,     QColor(s.textPrimary));
     return pal;
+}
+
+QString appStyleName(AppTheme theme)
+{
+    if (theme == AppTheme::Classic || theme == AppTheme::Silver)
+        return QStringLiteral("Fusion");   // clean, consistent base for custom QSS
+
+    // Light / Dark / Native ride on the platform-native style.
+    const QStringList keys = QStyleFactory::keys();
+    for (const char *cand : {"windowsvista", "macos", "macintosh", "windows"})
+        if (keys.contains(QLatin1String(cand), Qt::CaseInsensitive))
+            return QString::fromLatin1(cand);
+    return QStringLiteral("Fusion");
+}
+
+void applyAppTheme(AppTheme theme)
+{
+    if (QStyle *style = QStyleFactory::create(appStyleName(theme)))
+        QApplication::setStyle(style);
+
+    if (theme == AppTheme::Native)
+        QApplication::setPalette(QApplication::style()->standardPalette());
+    else
+        QApplication::setPalette(appPalette(theme));
+
+    if (qApp)
+        qApp->setStyleSheet(appStylesheet(theme));
 }

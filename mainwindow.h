@@ -39,6 +39,7 @@
 #include <QStatusBar>
 #include <QMenuBar>
 #include <QAction>
+#include <QActionGroup>
 #include <QTabWidget>
 #include <QTimer>
 #include <QModelIndex>
@@ -92,8 +93,6 @@ private:
     CartService      *cartService       { nullptr };
     CheckoutService  *checkoutService   { nullptr };
 
-    // ── Theme ───────────────────────────────────────────────────────────────
-    bool isDarkMode     { false };
 
     // ── UI — products panel (model/view, see productgridmodel.h) ───────────
     QGroupBox          *productsPanel  { nullptr };
@@ -133,7 +132,7 @@ private:
     QLabel *currentUserLabel{ nullptr };
 
     // ── UI — menu actions ───────────────────────────────────────────────────
-    QAction *themeAction            { nullptr };
+    QActionGroup *themeGroup        { nullptr };  // one checkable action per AppTheme
     QAction *analyticsButton        { nullptr };
     QAction *reportsButton          { nullptr };
     QAction *inventoryButton        { nullptr };
@@ -237,7 +236,6 @@ private slots:
     void onReceiptSettings();
     void onManageSchedules();
     void onBackupNow();
-    void onToggleTheme();
 
     // ── User ────────────────────────────────────────────────────────────────
     void onUserManagement();

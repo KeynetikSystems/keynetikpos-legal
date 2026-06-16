@@ -69,6 +69,29 @@ struct ColorScheme {
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
+// AppTheme — the selectable looks (each maps to a palette + a stylesheet +
+// a base Qt style; see appstyle.cpp).
+//   Light   – the original flat light theme
+//   Dark    – the original flat dark theme
+//   Classic – WinForms-style flat grey with squared controls
+//   Native  – the OS-native widget style (minimal stylesheet)
+//   Silver  – glossy brushed-metal / "plastic" gradients
+// ─────────────────────────────────────────────────────────────────────────────
+enum class AppTheme { Light, Dark, Classic, Native, Silver };
+
+inline QString appThemeName(AppTheme t)
+{
+    switch (t) {
+    case AppTheme::Light:   return QStringLiteral("Light");
+    case AppTheme::Dark:    return QStringLiteral("Dark");
+    case AppTheme::Classic: return QStringLiteral("Classic (WinForms)");
+    case AppTheme::Native:  return QStringLiteral("System Native");
+    case AppTheme::Silver:  return QStringLiteral("Silver Glossy");
+    }
+    return QStringLiteral("Light");
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // ThemeManager — single source of truth for the current theme
 // ─────────────────────────────────────────────────────────────────────────────
 class ThemeManager : public QObject
@@ -78,13 +101,19 @@ class ThemeManager : public QObject
 public:
     static ThemeManager& instance();
 
-    bool   isDark()  const { return m_isDark; }
-    void   setDark(bool dark);
-    void   toggle()        { setDark(!m_isDark); }
+    AppTheme theme() const { return m_theme; }
+    void     setTheme(AppTheme t);
+
+    // Back-compat helpers (the app still has a quick dark toggle).
+    bool   isDark()  const { return m_theme == AppTheme::Dark; }
+    void   setDark(bool dark) { setTheme(dark ? AppTheme::Dark : AppTheme::Light); }
+    void   toggle()           { setTheme(isDark() ? AppTheme::Light : AppTheme::Dark); }
 
     const ColorScheme& scheme() const { return m_scheme; }
 
 signals:
+    // isDark kept for existing connections; the parameter is true only for the
+    // Dark theme. Listeners typically just re-derive colours from getColorScheme().
     void themeChanged(bool isDark);
 
 private:
@@ -95,7 +124,7 @@ private:
 
     void buildScheme();
 
-    bool        m_isDark  = false;
+    AppTheme    m_theme = AppTheme::Light;
     ColorScheme m_scheme;
 };
 
@@ -181,6 +210,82 @@ inline ColorScheme getDarkColorScheme()
     s.activeColor      = "#2f2f2f";
     s.disabledBg       = "#333333";
     s.disabledText     = "#777777";
+    return s;
+}
+
+// Classic Windows-Forms grey: system dialog grey, squared controls, blue
+// selection. The squared corners come from the stylesheet (appstyle.cpp); this
+// just supplies the grey palette. Semantic accents stay so primary/danger
+// buttons keep their meaning.
+inline ColorScheme getClassicColorScheme()
+{
+    ColorScheme s;
+    s.bgPrimary        = "#f0f0f0";   // classic dialog grey
+    s.bgSecondary      = "#f0f0f0";
+
+    s.textPrimary      = "#000000";
+    s.textSecondary    = "#404040";
+
+    s.borderColor      = "#a0a0a0";   // 3-D-ish grey edges
+    s.inputBg          = "#ffffff";
+    s.inputFocusBorder = "#0078d7";   // Windows selection blue
+
+    s.accentPrimary    = "#27ae60";
+    s.accentSecondary  = "#0078d7";
+    s.accentTertiary   = "#8e44ad";
+    s.info             = "#0078d7";
+    s.success          = "#1e7d34";
+    s.warning          = "#b8860b";
+    s.error            = "#c0392b";
+
+    s.successBg        = "#e8f5e9";
+    s.successBorder    = "#b6dfb9";
+    s.warningBg        = "#fff4dc";
+    s.errorBg          = "#fdecea";
+    s.errorBorder      = "#f5b7b1";
+    s.infoBg           = "#e5f1fb";
+
+    s.hoverColor       = "#e5f1fb";   // classic light-blue hover
+    s.activeColor      = "#cce4f7";
+    s.disabledBg       = "#f0f0f0";
+    s.disabledText     = "#6d6d6d";
+    return s;
+}
+
+// Silver glossy "plastic": brushed-metal silver surfaces; the gloss (vertical
+// gradients, bevels) is produced by the stylesheet in appstyle.cpp.
+inline ColorScheme getSilverColorScheme()
+{
+    ColorScheme s;
+    s.bgPrimary        = "#c9ced6";   // brushed silver
+    s.bgSecondary      = "#eef1f5";
+
+    s.textPrimary      = "#1a1d22";
+    s.textSecondary    = "#4a4f57";
+
+    s.borderColor      = "#8a929e";
+    s.inputBg          = "#ffffff";
+    s.inputFocusBorder = "#5b8fd9";
+
+    s.accentPrimary    = "#3f8e54";
+    s.accentSecondary  = "#3f73b8";
+    s.accentTertiary   = "#7d5ba6";
+    s.info             = "#3f73b8";
+    s.success          = "#3f8e54";
+    s.warning          = "#c08a2e";
+    s.error            = "#c0453b";
+
+    s.successBg        = "#dfeede";
+    s.successBorder    = "#aecbab";
+    s.warningBg        = "#f3e9d2";
+    s.errorBg          = "#f3dad6";
+    s.errorBorder      = "#d9aaa3";
+    s.infoBg           = "#dde7f3";
+
+    s.hoverColor       = "#dfe4ea";
+    s.activeColor      = "#b9c0ca";
+    s.disabledBg       = "#d3d7dd";
+    s.disabledText     = "#8b9099";
     return s;
 }
 

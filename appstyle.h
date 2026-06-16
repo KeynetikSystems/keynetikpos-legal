@@ -33,8 +33,14 @@
 #include <QStyle>
 #include <QVariant>
 
-QString  appStylesheet(bool dark);
-QPalette appPalette(bool dark);
+#include "colorscheme.h"   // AppTheme
+
+QString  appStylesheet(AppTheme theme);
+QPalette appPalette(AppTheme theme);
+// The base Qt style key for a theme ("Fusion", or a native key for Native).
+QString  appStyleName(AppTheme theme);
+// Apply style + palette + app-wide stylesheet for the theme to qApp in one go.
+void     applyAppTheme(AppTheme theme);
 
 // Change a style-driving dynamic property at runtime and force the stylesheet
 // to re-evaluate. Needed whenever "kind"/"role" changes after the widget is

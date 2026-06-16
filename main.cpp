@@ -109,11 +109,9 @@ int main(int argc, char *argv[])
     QApplication a(argc, argv);
 
     // Theme everything from the start so the license prompts and the login
-    // dialog match the persisted light/dark choice. MainWindow::applyTheme()
-    // re-applies the same sheet on toggle.
-    const bool dark = ThemeManager::instance().isDark();
-    a.setStyleSheet(appStylesheet(dark));
-    QApplication::setPalette(appPalette(dark));
+    // dialog match the persisted theme. MainWindow::applyTheme() re-applies on
+    // a theme change. applyAppTheme() also sets the base Qt style + palette.
+    applyAppTheme(ThemeManager::instance().theme());
 
     // ── Anti-tamper check ────────────────────────────────────────
     if (AntiDebug::isThreatDetected()) {
