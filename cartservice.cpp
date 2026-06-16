@@ -6,16 +6,19 @@
 //  - The constructor creates the first cart so current() is valid from the
 //    start; removeCart() refuses to delete the last cart, preserving the
 //    "always at least one open cart" invariant the UI relies on.
-//  - Auto-generated cart names embed date+time plus a per-day counter, same
-//    scheme the main window used before the extraction.
+//  - Auto-generated cart names are just a per-day sequence ("Cart 1", "Cart 2",
+//    ...): the Nth cart opened today. The counter persists in QSettings so it
+//    keeps counting across restarts within the same day and resets at midnight.
+//    The wall-clock time of creation lives in Cart::createdTime (backend record
+//    only) — it is not part of the title.
 //  - Item mutations emit cartContentChanged; CartModel listens and resets,
 //    MainWindow listens and refreshes totals + the current tab label.
 // =============================================================================
 #include "cartservice.h"
 
 #include <QDate>
-#include <QTime>
 #include <QDebug>
+#include <QSettings>
 
 CartService::CartService(QObject *parent)
     : QObject(parent)
@@ -29,12 +32,15 @@ CartService::CartService(QObject *parent)
 
 QString CartService::makeCartName() const
 {
-    const QString dateStr = QDate::currentDate().toString("yyyyMMdd");
-    const QString timeStr = QTime::currentTime().toString("hhmmss");
-    int todayCount = 1;
-    for (auto it = m_carts.cbegin(); it != m_carts.cend(); ++it)
-        if (it.value().name.contains(dateStr)) ++todayCount;
-    return QString("Cart-%1-%2-%3").arg(dateStr, timeStr).arg(todayCount);
+    // Day-relative sequence number: the Nth cart opened today. Persisted so it
+    // survives restarts within the same day; resets when the date rolls over.
+    QSettings settings("KeynetikPOS", "KeynetikPOS");
+    const QString today   = QDate::currentDate().toString(Qt::ISODate);
+    const QString lastDay = settings.value("cart/counterDate").toString();
+    const int next = (lastDay == today ? settings.value("cart/counter").toInt() : 0) + 1;
+    settings.setValue("cart/counterDate", today);
+    settings.setValue("cart/counter", next);
+    return QStringLiteral("Cart %1").arg(next);
 }
 
 int CartService::createCart(const QString &name)
