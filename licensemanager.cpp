@@ -17,6 +17,7 @@
 #include <QSettings>
 #include <QJsonArray>
 #include <QCryptographicHash>
+#include <QRandomGenerator>
 #include <QDateTime>
 #include <QNetworkAccessManager>
 #include <QNetworkRequest>
@@ -501,6 +502,25 @@ void LicenseManager::initialize() {
         m_tier     = 4;
         m_features = featuresForTier(4);
     }
+
+    // Generate a one-time recovery code on the very first trial launch.
+    // It is shown once to the admin (in main.cpp) and then only the hash is kept.
+    if (readStoredRecoveryHash().isEmpty()) {
+        // 6-group × 4 hex chars = 24 random hex chars, displayed as XXXX-XXXX-XXXX-XXXX-XXXX-XXXX
+        const QByteArray rnd = QCryptographicHash::hash(
+            (QSysInfo::machineUniqueId()
+             + QDateTime::currentDateTime().toString(Qt::ISODate)
+             + QString::number(QRandomGenerator::global()->generate64())).toUtf8(),
+            QCryptographicHash::Sha256).toHex().left(24).toUpper();
+        QString code;
+        for (int i = 0; i < 6; ++i) {
+            if (i) code += '-';
+            code += rnd.mid(i * 4, 4);
+        }
+        writeRecoveryCode(code);
+        m_recoveryCodePlain     = code;
+        m_recoveryCodeGenerated = true;
+    }
 }
 
 // ════════════════════════════════════════════════════════════════
@@ -542,6 +562,35 @@ bool LicenseManager::verifyKeyFormat(const QString &key) const {
     if (!stored.isEmpty() && key.trimmed().toUpper() != stored.toUpper())
         return false;
     return validateKey(key);
+}
+
+// ── Recovery code ─────────────────────────────────────────────────────────────
+// Generated once at first trial launch, stored as a SHA-256 hash. The plaintext
+// is kept in memory only during the launch it was created so we can show it to
+// the admin; afterwards only the hash is available for verification.
+
+QString LicenseManager::readStoredRecoveryHash() const {
+    QSettings s(QSettings::NativeFormat, QSettings::UserScope, REG_ORG, REG_APP);
+    return s.value("License/RecoveryCodeHash", "").toString();
+}
+
+void LicenseManager::writeRecoveryCode(const QString &plainCode) {
+    const QString hash = QString::fromLatin1(
+        QCryptographicHash::hash(plainCode.toUtf8(), QCryptographicHash::Sha256).toHex());
+    QSettings s(QSettings::NativeFormat, QSettings::UserScope, REG_ORG, REG_APP);
+    s.setValue("License/RecoveryCodeHash", hash);
+}
+
+QString LicenseManager::recoveryCode()          const { return m_recoveryCodePlain; }
+bool    LicenseManager::recoveryCodeGenerated() const { return m_recoveryCodeGenerated; }
+
+bool LicenseManager::verifyRecoveryCode(const QString &code) const {
+    const QString stored = readStoredRecoveryHash();
+    if (stored.isEmpty()) return false;
+    const QString hash = QString::fromLatin1(
+        QCryptographicHash::hash(code.trimmed().toUtf8(),
+                                 QCryptographicHash::Sha256).toHex());
+    return hash == stored;
 }
 
 int         LicenseManager::tier()                             const { return m_tier; }

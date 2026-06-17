@@ -98,6 +98,15 @@ public:
     // that the caller possesses the license key before allowing a reset.
     bool         verifyKeyFormat(const QString &key) const;
 
+    // Trial password recovery — a one-time code generated at first launch,
+    // shown once to the admin, stored hashed. Used in place of the license key
+    // for the "Forgot password?" flow when the install is still on trial.
+    // Returns the plaintext code (only available immediately after generation;
+    // call recoveryCodeGenerated() to check if it was just created this session).
+    QString      recoveryCode()          const;   // plaintext — empty after first show
+    bool         recoveryCodeGenerated() const;   // true only during the launch it was created
+    bool         verifyRecoveryCode(const QString &code) const;
+
     // Tier / feature access
     int          tier()                              const;
     bool         hasTier(int minTier)                const;
@@ -145,6 +154,10 @@ private:
     // Apply a server-supplied tier + feature list (shared by activate + heartbeat)
     void        applyServerTier(int tier, const QStringList &features);
 
+    // ── Recovery code ────────────────────────────────────────────
+    QString   readStoredRecoveryHash()             const;
+    void      writeRecoveryCode(const QString &plainCode);
+
     // ── State ────────────────────────────────────────────────────
     LicenseState m_state                = LicenseState::Trial;
     int          m_daysLeft             = TRIAL_DAYS;
@@ -156,4 +169,7 @@ private:
 
     int          m_tier     = 1;          // effective tier for this session
     QStringList  m_features;              // individual feature slugs from server
+
+    QString      m_recoveryCodePlain;     // non-empty only during the launch it was generated
+    bool         m_recoveryCodeGenerated = false;
 };

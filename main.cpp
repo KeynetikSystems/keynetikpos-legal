@@ -125,6 +125,22 @@ int main(int argc, char *argv[])
     // ── 1. Check license BEFORE showing anything ────────────────
     LicenseManager::instance().initialize();
 
+    // Show the one-time recovery code if this is the very first launch.
+    if (LicenseManager::instance().recoveryCodeGenerated()) {
+        const QString code = LicenseManager::instance().recoveryCode();
+        QMessageBox box(nullptr);
+        box.setWindowTitle("Save Your Recovery Code");
+        box.setIcon(QMessageBox::Warning);
+        box.setText("<b>Write down your recovery code and keep it safe.</b>");
+        box.setInformativeText(
+            "If you ever forget your password, this code lets you reset it "
+            "from the login screen.<br><br>"
+            "<b style='font-size:14pt;letter-spacing:2px;'>" + code + "</b><br><br>"
+            "This code will <b>not</b> be shown again.");
+        box.setStandardButtons(QMessageBox::Ok);
+        box.exec();
+    }
+
     auto state = LicenseManager::instance().state();
 
     if (LicenseManager::instance().wasTampered()) {

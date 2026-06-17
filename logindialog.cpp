@@ -10,7 +10,7 @@
 //    semantic styling via "kind" properties.
 // =============================================================================
 #include "LoginDialog.h"
-#include "licensemanager.h"
+#include "licensemanager.h"   // LicenseManager, LicenseState
 #include "usermanager.h"
 #include <QVBoxLayout>
 #include <QHBoxLayout>
@@ -145,19 +145,23 @@ void LoginDialog::onForgotPassword()
 {
     // Step 1 — tell the user what they need and show the device ID for support.
     const QString deviceId = QString::fromLatin1(QSysInfo::machineUniqueId());
+    const bool isTrial = (LicenseManager::instance().state() == LicenseState::Trial
+                       || LicenseManager::instance().state() == LicenseState::TrialExpired);
+    const QString tokenLabel = isTrial ? "recovery code" : "license key";
+
     QMessageBox info(this);
     info.setWindowTitle("Password Recovery");
     info.setIcon(QMessageBox::Information);
     info.setText("<b>Password Recovery</b>");
     info.setInformativeText(
-        "To reset a password you need your <b>license key</b>.<br><br>"
+        "To reset a password you need your <b>" + tokenLabel + "</b>.<br><br>"
         "If you don't have it, contact:<br>"
         "<b>support@keynetik.com</b><br><br>"
         "Device ID (quote this to support):<br>"
         "<code>" + deviceId + "</code>");
     info.setStandardButtons(QMessageBox::Ok | QMessageBox::Cancel);
     info.setDefaultButton(QMessageBox::Ok);
-    info.button(QMessageBox::Ok)->setText("I have my key");
+    info.button(QMessageBox::Ok)->setText("I have my " + tokenLabel);
     if (info.exec() != QMessageBox::Ok)
         return;
 
@@ -169,17 +173,25 @@ void LoginDialog::onForgotPassword()
         QLineEdit::Normal, "", &ok).trimmed();
     if (!ok || targetUser.isEmpty()) return;
 
-    // Step 3 — verify the license key.
+    // Step 3 — verify the recovery token (recovery code for trial, license key for activated).
     const QString licKey = QInputDialog::getText(
         this, "Password Recovery",
-        "Enter your license key to confirm your identity:",
+        "Enter your " + tokenLabel + " to confirm your identity:",
         QLineEdit::Normal, "", &ok).trimmed();
     if (!ok || licKey.isEmpty()) return;
 
-    if (!LicenseManager::instance().verifyKeyFormat(licKey)) {
+    // Trial installs use the recovery code; activated installs use the license key.
+    const bool verified = isTrial
+        ? LicenseManager::instance().verifyRecoveryCode(licKey)
+        : LicenseManager::instance().verifyKeyFormat(licKey);
+
+    if (!verified) {
         QMessageBox::warning(this, "Password Recovery",
-            "The license key you entered is not valid.\n"
-            "Contact support@keynetik.com for help.");
+            isTrial
+                ? "The recovery code you entered is not correct.\n"
+                  "Contact support@keynetik.com for help."
+                : "The license key you entered is not valid.\n"
+                  "Contact support@keynetik.com for help.");
         return;
     }
 
