@@ -46,6 +46,9 @@ public:
     bool deleteUser(int userId);
     bool changePassword(int userId, const QString &newPassword);
     bool changeOwnPassword(const QString &oldPassword, const QString &newPassword);
+    // Emergency reset: sets a temporary password + mustChangePassword. Used by
+    // the "Forgot password?" flow after license-key verification.
+    bool adminResetPassword(const QString &username, const QString &tempPassword);
     User getUserById(int id);
     User getUserByUsername(const QString &username);
     QVector<User> getAllUsers();

@@ -253,6 +253,17 @@ bool UserManager::changePassword(int userId, const QString &newPassword) {
     return false;
 }
 
+bool UserManager::adminResetPassword(const QString &username, const QString &tempPassword) {
+    // No session required — this is called from the login screen before any
+    // user is logged in. Caller must have verified the license key first.
+    QSqlQuery q;
+    q.prepare("UPDATE users SET password_hash = :h, must_change_password = 1 "
+              "WHERE username = :u AND is_active = 1");
+    q.bindValue(":h", hashPassword(tempPassword));
+    q.bindValue(":u", username);
+    return q.exec() && q.numRowsAffected() > 0;
+}
+
 bool UserManager::changeOwnPassword(const QString &oldPassword, const QString &newPassword) {
     if (!loggedIn) {
         return false;

@@ -535,6 +535,15 @@ QString LicenseManager::maskedKey() const {
     return "****-****-****-" + k.right(4);
 }
 
+bool LicenseManager::verifyKeyFormat(const QString &key) const {
+    // For trial installs (no stored key) accept any format-valid key as the
+    // reset token; for activated installs the key must also match the stored one.
+    const QString stored = readStoredKey();
+    if (!stored.isEmpty() && key.trimmed().toUpper() != stored.toUpper())
+        return false;
+    return validateKey(key);
+}
+
 int         LicenseManager::tier()                             const { return m_tier; }
 QStringList LicenseManager::features()                         const { return m_features; }
 bool        LicenseManager::hasTier(int minTier)               const { return m_tier >= minTier; }

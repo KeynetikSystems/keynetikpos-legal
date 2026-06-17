@@ -93,6 +93,10 @@ public:
     int          offlineDaysRemaining() const;
     bool         wasTampered()          const;
     QString      maskedKey()            const;
+    // Checks that the supplied key passes format + checksum validation without
+    // changing any stored state. Used by the password-recovery dialog to verify
+    // that the caller possesses the license key before allowing a reset.
+    bool         verifyKeyFormat(const QString &key) const;
 
     // Tier / feature access
     int          tier()                              const;
