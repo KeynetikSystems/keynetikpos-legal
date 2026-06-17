@@ -26,6 +26,7 @@
 #include <QButtonGroup>
 
 #include "money.h"
+#include "database.h"   // Customer
 
 class PaymentDialog : public QDialog
 {
@@ -35,10 +36,19 @@ public:
     explicit PaymentDialog(Money totalAmount, QWidget *parent = nullptr);
     ~PaymentDialog();
 
+    // Optionally attach a customer before exec() — shows their store credit
+    // balance and lets the cashier apply it against the total.
+    void setCustomer(const Customer &customer);
+
     QString getPaymentMethod() const;
     Money getAmountPaid() const;
     Money getChange() const;
     QString getReferenceNumber() const;
+    // Non-zero only when the cashier chose to apply store credit.
+    Money getStoreCreditUsed() const;
+    int   getCustomerId() const;
+    // Points burned via "Redeem Points" this checkout (0 if not used).
+    int   getLoyaltyPointsRedeemed() const;
 
 private slots:
     void onPaymentMethodChanged();
@@ -68,6 +78,20 @@ private:
     double amountPaid;
     double change;
     QString paymentMethod;
+
+    // Customer store-credit widgets (hidden when no customer is set)
+    QLabel       *creditAvailableLabel { nullptr };
+    QPushButton  *applyCreditButton    { nullptr };
+
+    // Loyalty redemption widgets (hidden when no customer / no points)
+    QLabel       *loyaltyLabel         { nullptr };
+    QPushButton  *redeemPointsButton   { nullptr };
+
+    // Customer state
+    Customer  m_customer;
+    bool      m_hasCustomer    { false };
+    Money     m_storeCreditUsed;
+    int       m_pointsRedeemed { 0 };   // points burned this checkout
 };
 
 #endif // PAYMENTDIALOG_H

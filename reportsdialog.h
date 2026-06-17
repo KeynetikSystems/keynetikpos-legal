@@ -45,6 +45,8 @@ private:
     void generateSalesByPaymentReport();
     void generateTopSellingProductsReport();
     void generateDailySalesReport();
+    void generateProfitLossReport();
+    void generateStockValuationReport();
 
     // UI Components
     QComboBox *reportTypeCombo;

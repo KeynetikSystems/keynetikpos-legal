@@ -189,6 +189,12 @@ private:
     QPointer<InventoryDialog>    m_inventoryDlg;
     QPointer<SalesHistoryDialog> m_salesHistoryDlg;
 
+    // Active customer for the current checkout (cleared after each sale)
+    Customer    m_selectedCustomer;
+    bool        m_hasSelectedCustomer { false };
+    QPushButton *customerLabel        { nullptr };   // doubles as selector button
+    QPushButton *clearCustomerButton  { nullptr };
+
     // Toggle the grid/cart between content and an empty-state placeholder.
     void updateProductEmptyState();
     void updateCartEmptyState();
@@ -222,6 +228,14 @@ private slots:
     void onInventoryLow(int productId, const QString &productName, int quantity);
     void onInventoryCritical(int productId, const QString &productName, int quantity);
     void onInventoryOutOfStock(int productId, const QString &productName);
+
+    // ── Purchasing (suppliers / purchase orders) ────────────────────────────
+    void onManageSuppliers();
+    void onManagePurchaseOrders();
+
+    // ── Customer selection (cart panel) ─────────────────────────────────────
+    void onSelectCustomer();
+    void onClearCustomer();
 
     // ── Sales / reports ─────────────────────────────────────────────────────
     void onViewSalesHistory();

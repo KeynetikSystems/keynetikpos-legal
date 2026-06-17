@@ -78,6 +78,83 @@ struct SaleItem
     Money subtotal;
 };
 
+// ── Purchasing (suppliers / purchase orders) ───────────────────────────────
+// First ERP-facing module: the "other half" of inventory. Sales/stock_adjust-
+// ments already cover stock leaving the business; Supplier/PurchaseOrder*
+// cover stock arriving, with a per-line cost so margins stay accurate.
+struct Supplier
+{
+    int id = 0;
+    QString name;
+    QString contactPerson;
+    QString phone;
+    QString email;
+    QString address;
+    bool isActive = true;
+};
+
+struct PurchaseOrderItem
+{
+    int id = 0;
+    int poId = 0;
+    int productId = 0;
+    QString productName;   // snapshot, same reasoning as SaleItem
+    int quantity = 0;
+    Money unitCost;
+    Money subtotal;
+};
+
+struct PurchaseOrder
+{
+    int id = 0;
+    int supplierId = 0;
+    QString supplierName;  // joined in for display convenience
+    QString status;        // 'Pending' | 'Received' | 'Cancelled'
+    QString orderDate;
+    QString receivedDate;
+    QString notes;
+    QString createdBy;
+    Money total;
+};
+
+// ── Expense tracking ───────────────────────────────────────────────────────
+struct ExpenseCategory
+{
+    int id = 0;
+    QString name;
+    bool isActive = true;
+};
+
+struct Expense
+{
+    int id = 0;
+    int categoryId = 0;
+    QString categoryName;   // joined
+    Money amount;
+    QString description;
+    QString date;           // YYYY-MM-DD
+    QString recordedBy;
+    QString createdAt;
+};
+
+// ── Customer accounts ──────────────────────────────────────────────────────
+// Loyalty points are integer units (1 point per whole 100 KSh spent).
+// Store credit is integer cents, like all money in the app. Both accrue
+// inside the same recordSale() transaction so they're always consistent
+// with the actual sale record.
+struct Customer
+{
+    int id = 0;
+    QString name;
+    QString phone;          // used as the quick-lookup key at checkout
+    QString email;
+    QString address;
+    int loyaltyPoints = 0;
+    Money storeCredit;
+    bool isActive = true;
+    QString createdAt;
+};
+
 class Database
 {
 public:
@@ -125,12 +202,16 @@ public:
     int getStock(int productId);
 
     // Sales operations
-    // Atomically validates stock, inserts the sale + items, and decrements
-    // stock. Returns the new sale id, or -1 (see getLastError()).
+    // Atomically validates stock, inserts the sale + items, decrements stock,
+    // and — when customerId > 0 — awards loyalty points + deducts any applied
+    // store credit from the customer row, all in one transaction.
+    // Returns the new sale id, or -1 (see getLastError()).
     int recordSale(const QVector<SaleItem> &items,
                    Money subtotal, Money tax, Money discount, Money total,
                    const QString &paymentMethod,
-                   Money amountPaid, Money changeDue);
+                   Money amountPaid, Money changeDue,
+                   int customerId = 0,
+                   Money storeCreditUsed = Money::fromCents(0));
     QVector<Sale> getAllSales();
     QVector<Sale> getSalesByDateRange(const QString &startDate, const QString &endDate);
     QVector<SaleItem> getSaleItems(int saleId);
@@ -152,6 +233,57 @@ public:
     bool processRefund(int saleId, const QString &reason, const QString &processedBy);
     bool isRefunded(int saleId) const;
 
+    // Supplier operations
+    QVector<Supplier> getAllSuppliers(bool includeInactive = false);
+    Supplier getSupplierById(int id);
+    bool addSupplier(const Supplier &supplier);
+    bool updateSupplier(const Supplier &supplier);
+    // Soft delete: suppliers are referenced by historical purchase orders, so
+    // they're deactivated (hidden from pickers) rather than removed.
+    bool deactivateSupplier(int id);
+
+    // Purchase order operations
+    // Inserts the PO header + line items in one transaction; status starts
+    // 'Pending'. Returns the new PO id, or -1 (see getLastError()).
+    int createPurchaseOrder(int supplierId, const QVector<PurchaseOrderItem> &items,
+                            const QString &notes, const QString &createdBy);
+    QVector<PurchaseOrder> getAllPurchaseOrders();
+    QVector<PurchaseOrder> getPurchaseOrdersBySupplier(int supplierId);
+    PurchaseOrder getPurchaseOrderById(int id);
+    QVector<PurchaseOrderItem> getPurchaseOrderItems(int poId);
+    // Atomically: increases stock for every line, updates each product's
+    // cost_price to the PO's unit cost (latest-cost basis), logs a
+    // stock_adjustments row per line, and flips the PO to 'Received'. Fails
+    // (no-op) if the PO isn't currently 'Pending'.
+    bool receivePurchaseOrder(int poId, const QString &receivedBy);
+    bool cancelPurchaseOrder(int poId);
+
+    // Expense category operations
+    QVector<ExpenseCategory> getAllExpenseCategories(bool includeInactive = false);
+    bool addExpenseCategory(const QString &name);
+    bool deactivateExpenseCategory(int id);
+
+    // Expense operations
+    bool addExpense(const Expense &expense);
+    QVector<Expense> getAllExpenses();
+    QVector<Expense> getExpensesByDateRange(const QString &startDate,
+                                            const QString &endDate);
+    // Sum of all expenses in the date range (for P&L computation).
+    Money getTotalExpenses(const QString &startDate, const QString &endDate);
+
+    // Customer operations
+    QVector<Customer> getAllCustomers(bool includeInactive = false);
+    Customer getCustomerById(int id);
+    // Efficient phone lookup — used at checkout for quick customer selection.
+    Customer getCustomerByPhone(const QString &phone);
+    bool addCustomer(const Customer &customer);
+    bool updateCustomer(const Customer &customer);
+    bool deactivateCustomer(int id);
+    // Explicit store-credit top-up (used from CustomerDialog — not the same
+    // as the credit earned during a sale, which goes through recordSale).
+    bool adjustStoreCredit(int customerId, Money delta, const QString &reason);
+    QVector<Sale> getCustomerPurchaseHistory(int customerId);
+
     // Backup
     // Checkpoints the WAL and copies the live DB file to destDir as
     // pos_database_YYYYMMDD_HHmmss.db. On success, *outPath (if given) gets the
@@ -172,6 +304,32 @@ public:
     Money getActualGrossProfit(const QString &startDate, const QString &endDate);
     Money getActualGrossProfitToday();
     Money getActualGrossProfitThisMonth();
+
+    // P&L: revenue, COGS, expenses, net profit for a date range
+    struct ProfitLossRow {
+        QString date;          // YYYY-MM or YYYY-MM-DD depending on granularity
+        Money revenue;
+        Money cogs;
+        Money expenses;
+        Money grossProfit() const { return revenue - cogs; }
+        Money netProfit()   const { return revenue - cogs - expenses; }
+    };
+    QVector<ProfitLossRow> getProfitLossByDateRange(const QString &start,
+                                                    const QString &end);
+
+    // Stock valuation: current qty * cost_price per product
+    struct StockValuationRow {
+        QString productName;
+        QString category;
+        int     qty;
+        Money   costPrice;
+        Money   value() const { return costPrice * qty; }
+    };
+    QVector<StockValuationRow> getStockValuation();
+
+    // Loyalty redemption: burn points to store credit (100 pts = 10 KSh = 1000 cents)
+    // Returns false if customer has insufficient points. Caller decides the rate.
+    bool redeemLoyaltyPoints(int customerId, int pointsToRedeem, Money creditValue);
 
 private:
     Database();

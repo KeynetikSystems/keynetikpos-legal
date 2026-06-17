@@ -31,6 +31,10 @@
 #include "receiptprinter.h"
 #include "inventorydialog.h"
 #include "lowstockdialog.h"
+#include "supplierdialog.h"
+#include "purchaseorderdialog.h"
+#include "expensedialog.h"
+#include "customerdialog.h"
 #include "saleshistorydialog.h"
 #include "CartItem.h"
 #include "scheduledialog.h"
@@ -47,6 +51,7 @@
 #include "appstyle.h"
 #include "productgridmodel.h"
 #include "changepassworddialog.h"
+#include "licensemanager.h"
 
 #include <QVBoxLayout>
 #include <QHBoxLayout>
@@ -115,6 +120,37 @@ static inline bool checkPermission(QWidget *parent, Permission perm,
         return true;
     QMessageBox::warning(parent, "Access Denied",
                          QString("You do not have permission to %1.").arg(featureName));
+    return false;
+}
+
+static const char *tierName(int t) {
+    switch (t) {
+    case 2: return "POS Pro";
+    case 3: return "ERP Lite";
+    case 4: return "ERP Full";
+    default: return "a higher";
+    }
+}
+
+// Returns true when the active license covers minTier.
+// Shows an upgrade dialog and returns false otherwise.
+static inline bool checkLicenseTier(QWidget *parent, int minTier,
+                                    const QString &featureName)
+{
+    if (LicenseManager::instance().hasTier(minTier)) return true;
+    const int current = LicenseManager::instance().tier();
+    QMessageBox dlg(parent);
+    dlg.setWindowTitle("Upgrade Required");
+    dlg.setIcon(QMessageBox::Information);
+    dlg.setText(QString("<b>%1</b> requires the <b>%2</b> tier or higher.")
+                    .arg(featureName, tierName(minTier)));
+    dlg.setInformativeText(
+        QString("Your current license is <b>Tier %1 (%2)</b>.<br><br>"
+                "Contact <a href='mailto:sales@keynetik.com'>sales@keynetik.com</a> "
+                "to upgrade.")
+            .arg(current).arg(tierName(current)));
+    dlg.setTextFormat(Qt::RichText);
+    dlg.exec();
     return false;
 }
 
@@ -486,6 +522,11 @@ void MainWindow::setupMenuBar()
     inventoryMenu->addSeparator();
     connect(inventoryMenu->addAction("Low Stock Alert"),
             &QAction::triggered, this, &MainWindow::onShowLowStock);
+    inventoryMenu->addSeparator();
+    connect(inventoryMenu->addAction("Suppliers..."),
+            &QAction::triggered, this, &MainWindow::onManageSuppliers);
+    connect(inventoryMenu->addAction("Purchase Orders..."),
+            &QAction::triggered, this, &MainWindow::onManagePurchaseOrders);
 
     // Reports
     QMenu *reportsMenu = mb->addMenu("&Reports");
@@ -497,6 +538,22 @@ void MainWindow::setupMenuBar()
             this, &MainWindow::onDailyReport);
     connect(reportsMenu->addAction("Detailed Reports"),
             &QAction::triggered, this, &MainWindow::onShowReports);
+
+    // Finance
+    QMenu *financeMenu = mb->addMenu("&Finance");
+    connect(financeMenu->addAction("Expenses..."),
+            &QAction::triggered, this, [this]() {
+        if (!checkLicenseTier(this, 3, "Expense Tracking")) return;
+        ExpenseDialog dlg(this);
+        dlg.exec();
+    });
+    financeMenu->addSeparator();
+    connect(financeMenu->addAction("Customers..."),
+            &QAction::triggered, this, [this]() {
+        if (!checkLicenseTier(this, 3, "Customer Accounts")) return;
+        CustomerDialog dlg(this);
+        dlg.exec();
+    });
 
     // Settings
     QMenu *settingsMenu = mb->addMenu("&Settings");
@@ -669,6 +726,23 @@ void MainWindow::setupCartPanel()
 
     setupCartSelector();
     layout->addWidget(cartSelectorWidget);
+
+    // Customer selector strip — shows "Walk-in" by default; cashier clicks to
+    // assign a customer account, which unlocks store credit at checkout and
+    // records loyalty points. Cleared automatically after each completed sale.
+    QHBoxLayout *customerRow = new QHBoxLayout();
+    QPushButton *selectCustomerBtn = new QPushButton("Customer: Walk-in", this);
+    selectCustomerBtn->setProperty("kind", "info");
+    connect(selectCustomerBtn, &QPushButton::clicked, this, &MainWindow::onSelectCustomer);
+    customerLabel = selectCustomerBtn;    // reuse as the label via pointer alias
+    clearCustomerButton = new QPushButton("✕", this);
+    clearCustomerButton->setMaximumWidth(32);
+    clearCustomerButton->setToolTip("Clear selected customer");
+    clearCustomerButton->setEnabled(false);
+    connect(clearCustomerButton, &QPushButton::clicked, this, &MainWindow::onClearCustomer);
+    customerRow->addWidget(selectCustomerBtn, 1);
+    customerRow->addWidget(clearCustomerButton);
+    layout->addLayout(customerRow);
 
     cartModel = new CartModel(cartService, this);
     cartModel->setStockProvider([](int productId) {
@@ -1028,19 +1102,23 @@ void MainWindow::onCheckout()
                                            settingsManager->settings());
 
     PaymentDialog paymentDialog(t.total, this);
+    if (m_hasSelectedCustomer)
+        paymentDialog.setCustomer(m_selectedCustomer);
     if (paymentDialog.exec() != QDialog::Accepted) return;
 
     const Money amountPaid = paymentDialog.getAmountPaid();
     const Money change     = paymentDialog.getChange();
 
     // CheckoutService runs the pipeline: recordSale (atomic stock check +
-    // insert + decrement) -> receipt -> inventory refresh -> audit log.
-    // On failure the cart is preserved and no receipt is printed.
+    // insert + decrement + customer loyalty/credit) -> receipt -> inventory
+    // refresh -> audit log. On failure the cart is preserved.
     const CheckoutResult result = checkoutService->finalizeSale(
         *activeCart, t,
         paymentDialog.getPaymentMethod(),
         paymentDialog.getReferenceNumber(),
-        amountPaid, change);
+        amountPaid, change,
+        paymentDialog.getCustomerId(),
+        paymentDialog.getStoreCreditUsed());
 
     if (!result.ok) {
         QMessageBox::critical(this, "Checkout Failed",
@@ -1071,6 +1149,20 @@ void MainWindow::onCheckout()
     // Change due is the one figure the cashier must act on, so it stays in the
     // persistent status bar in addition to the auto-dismissing toast. Focus
     // returns to the search box, ready for the next customer.
+    // Burn loyalty points if the cashier redeemed them
+    const int redeemedPts = paymentDialog.getLoyaltyPointsRedeemed();
+    if (redeemedPts > 0) {
+        const Money creditValue = Money::fromCents(redeemedPts * 10LL);
+        Database::instance().redeemLoyaltyPoints(
+            paymentDialog.getCustomerId(), redeemedPts, creditValue);
+    }
+
+    // Reset customer selection for the next sale
+    m_hasSelectedCustomer = false;
+    m_selectedCustomer    = Customer{};
+    customerLabel->setText("Customer: Walk-in");
+    clearCustomerButton->setEnabled(false);
+
     const QString summary = change.cents() > 0
         ? QString("Sale #%1 complete — Change due: %2")
               .arg(result.saleId).arg(formatCurrency(change))
@@ -1354,6 +1446,57 @@ void MainWindow::onShowLowStock()
     loadProducts();
 }
 
+// =============================================================================
+// Purchasing slots (suppliers / purchase orders)
+// =============================================================================
+
+void MainWindow::onManageSuppliers()
+{
+    if (!checkLicenseTier(this, 3, "Supplier Management")) return;
+    if (!checkPermission(this, Permission::ADJUST_STOCK, "manage suppliers")) return;
+    SupplierDialog dlg(this);
+    dlg.exec();
+}
+
+void MainWindow::onManagePurchaseOrders()
+{
+    if (!checkLicenseTier(this, 3, "Purchase Orders")) return;
+    if (!checkPermission(this, Permission::ADJUST_STOCK, "manage purchase orders"))
+        return;
+    PurchaseOrderDialog dlg(this);
+    dlg.exec();
+    // Receiving a PO changes stock_quantity directly in the DB, so the grid
+    // (which only learns about changes via updateStock()/checkout) needs an
+    // explicit reload — same reasoning as onManageInventory()'s finished hook.
+    loadProducts();
+}
+
+// =============================================================================
+// Customer selection slots (cart panel)
+// =============================================================================
+
+void MainWindow::onSelectCustomer()
+{
+    if (!checkLicenseTier(this, 3, "Customer Accounts")) return;
+    CustomerDialog dlg(this);
+    dlg.exec();
+    const Customer selected = dlg.getSelectedCustomer();
+    if (selected.id <= 0) return;
+
+    m_selectedCustomer    = selected;
+    m_hasSelectedCustomer = true;
+    customerLabel->setText(QString("Customer: %1").arg(selected.name));
+    clearCustomerButton->setEnabled(true);
+}
+
+void MainWindow::onClearCustomer()
+{
+    m_selectedCustomer    = Customer{};
+    m_hasSelectedCustomer = false;
+    customerLabel->setText("Customer: Walk-in");
+    clearCustomerButton->setEnabled(false);
+}
+
 void MainWindow::onInventoryLow(int productId, const QString &productName,
                                 int quantity)
 {
@@ -1384,6 +1527,7 @@ void MainWindow::onInventoryOutOfStock(int productId,
 
 void MainWindow::onShowAnalytics()
 {
+    if (!checkLicenseTier(this, 2, "Analytics Dashboard")) return;
     if (!checkPermission(this, Permission::VIEW_ANALYTICS, "view analytics"))
         return;
     AnalyticsDashboard dashboard(this);
@@ -1394,6 +1538,7 @@ void MainWindow::onShowAnalytics()
 
 void MainWindow::onShowReports()
 {
+    if (!checkLicenseTier(this, 2, "Reports")) return;
     if (!checkPermission(this, Permission::VIEW_REPORTS, "view reports"))
         return;
     ReportsDialog dialog(this);
@@ -1506,6 +1651,7 @@ void MainWindow::onEmailReceipt()
 
 void MainWindow::onDailyReport()
 {
+    if (!checkLicenseTier(this, 2, "Daily Report")) return;
     if (!checkPermission(this, Permission::VIEW_REPORTS, "view reports"))
         return;
 
@@ -1572,6 +1718,7 @@ void MainWindow::onDailyReport()
 
 void MainWindow::onManageSchedules()
 {
+    if (!checkLicenseTier(this, 2, "Message Schedules")) return;
     ScheduleDialog dlg(scheduleManager, this);
     dlg.exec();
 }
@@ -1653,6 +1800,7 @@ void MainWindow::applyTheme()
 
 void MainWindow::onUserManagement()
 {
+    if (!checkLicenseTier(this, 2, "User Management")) return;
     if (!checkPermission(this, Permission::VIEW_USERS, "access user management"))
         return;
     UserManagementDialog dialog(this);

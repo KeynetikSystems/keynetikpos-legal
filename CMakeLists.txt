@@ -87,6 +87,10 @@ set(PROJECT_SOURCES
     settingsdialog.cpp settingsdialog.h
     zreportdialog.cpp zreportdialog.h
     lowstockdialog.cpp lowstockdialog.h
+    supplierdialog.cpp supplierdialog.h
+    purchaseorderdialog.cpp purchaseorderdialog.h
+    expensedialog.cpp expensedialog.h
+    customerdialog.cpp customerdialog.h
     MessageSchedule.h
     licensemanager.h licensemanager.cpp
     antidebug.h

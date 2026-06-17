@@ -31,7 +31,9 @@ CheckoutResult CheckoutService::finalizeSale(const Cart &cart,
                                              const QString &paymentMethod,
                                              const QString &referenceNumber,
                                              Money amountPaid,
-                                             Money change) const
+                                             Money change,
+                                             int customerId,
+                                             Money storeCreditUsed) const
 {
     CheckoutResult result;
 
@@ -48,10 +50,11 @@ CheckoutResult CheckoutService::finalizeSale(const Cart &cart,
         saleItems.append(si);
     }
 
-    // Atomic: sale + items + stock decrement commit together, or nothing does.
+    // Atomic: sale + items + stock decrement + customer loyalty/credit all
+    // commit together, or nothing does.
     const int saleId = Database::instance().recordSale(
         saleItems, t.subtotal, t.tax, t.discount, t.total,
-        paymentMethod, amountPaid, change);
+        paymentMethod, amountPaid, change, customerId, storeCreditUsed);
 
     if (saleId < 0) {
         result.error = Database::instance().getLastError();
@@ -76,7 +79,9 @@ CheckoutResult CheckoutService::finalizeSale(const Cart &cart,
     receipt.referenceNumber = referenceNumber;
     receipt.amountPaid      = amountPaid;
     receipt.change          = change;
-    receipt.customerName    = "";
+    receipt.customerName    = customerId > 0
+                                  ? Database::instance().getCustomerById(customerId).name
+                                  : QString();
     receipt.cashierName     =
         UserManager::instance().getCurrentUser().fullName;
 

@@ -42,7 +42,9 @@ public:
     CheckoutResult finalizeSale(const Cart &cart, const CartTotals &totals,
                                 const QString &paymentMethod,
                                 const QString &referenceNumber,
-                                Money amountPaid, Money change) const;
+                                Money amountPaid, Money change,
+                                int customerId = 0,
+                                Money storeCreditUsed = Money::fromCents(0)) const;
 
 private:
     InventoryManager *m_inventory;

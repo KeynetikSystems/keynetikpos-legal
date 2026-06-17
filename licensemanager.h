@@ -21,7 +21,9 @@
 // =============================================================================
 #pragma once
 #include <QString>
+#include <QStringList>
 #include <QDateTime>
+#include <QWidget>
 
 enum class LicenseState {
     FullLicense,
@@ -29,6 +31,37 @@ enum class LicenseState {
     TrialExpired,
     InvalidKey
 };
+
+// ── Tier definitions ──────────────────────────────────────────────────────────
+// Tier 1  POS Core      : checkout, products, basic inventory
+// Tier 2  POS Pro       : user management, reports, schedules, barcode, WhatsApp
+// Tier 3  ERP Lite      : suppliers, purchasing, expenses, customers, P&L
+// Tier 4  ERP Full      : multi-branch, payroll, VAT, approval workflows
+//
+// During trial the effective tier is 4 (evaluate everything).
+// A FullLicense without server-supplied tier data defaults to 1 (safe minimum).
+
+// ── Per-feature string constants ──────────────────────────────────────────────
+// The server returns a JSON array of enabled feature slugs; these constants are
+// the canonical slug values used on both the server and client.
+namespace Feature {
+    // Tier 2
+    inline constexpr const char *USER_MANAGEMENT  = "user_management";
+    inline constexpr const char *ADVANCED_REPORTS = "advanced_reports";
+    inline constexpr const char *SCHEDULES        = "schedules";
+    inline constexpr const char *BARCODE          = "barcode";
+    inline constexpr const char *MESSAGING        = "messaging";
+    // Tier 3
+    inline constexpr const char *PURCHASING       = "purchasing";
+    inline constexpr const char *EXPENSES         = "expenses";
+    inline constexpr const char *CUSTOMERS        = "customers";
+    inline constexpr const char *PL_REPORT        = "pl_report";
+    inline constexpr const char *STOCK_VALUATION  = "stock_valuation";
+    // Tier 4 (reserved — not yet implemented)
+    inline constexpr const char *MULTI_BRANCH     = "multi_branch";
+    inline constexpr const char *PAYROLL          = "payroll";
+    inline constexpr const char *VAT_MODULE       = "vat_module";
+}
 
 class LicenseManager {
 public:
@@ -60,6 +93,12 @@ public:
     int          offlineDaysRemaining() const;
     bool         wasTampered()          const;
     QString      maskedKey()            const;
+
+    // Tier / feature access
+    int          tier()                              const;
+    bool         hasTier(int minTier)                const;
+    bool         hasFeature(const QString &feature)  const;
+    QStringList  features()                          const;
 
 private:
     LicenseManager() = default;
@@ -93,6 +132,15 @@ private:
     void      writeRegistryHash()                               const;
     bool      verifyRegistryHash()                              const;
 
+    // ── Registry helpers for tier/features ───────────────────────
+    int         readStoredTier()     const;
+    void        writeStoredTier(int tier) const;
+    QStringList readStoredFeatures() const;
+    void        writeStoredFeatures(const QStringList &features) const;
+
+    // Apply a server-supplied tier + feature list (shared by activate + heartbeat)
+    void        applyServerTier(int tier, const QStringList &features);
+
     // ── State ────────────────────────────────────────────────────
     LicenseState m_state                = LicenseState::Trial;
     int          m_daysLeft             = TRIAL_DAYS;
@@ -101,4 +149,7 @@ private:
     int          m_offlineDaysRemaining = MAX_OFFLINE_DAYS;
     bool         m_tampered             = false;
     QString      m_lastOnlineError;
+
+    int          m_tier     = 1;          // effective tier for this session
+    QStringList  m_features;              // individual feature slugs from server
 };

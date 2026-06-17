@@ -289,6 +289,89 @@ bool Database::createTables()
             FOREIGN KEY (sale_id) REFERENCES sales(id)
         )
     )";
+    // Suppliers table
+    queries << R"(
+        CREATE TABLE IF NOT EXISTS suppliers (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            name TEXT NOT NULL,
+            contact_person TEXT,
+            phone TEXT,
+            email TEXT,
+            address TEXT,
+            is_active INTEGER DEFAULT 1,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    )";
+    // Purchase orders (header)
+    queries << R"(
+        CREATE TABLE IF NOT EXISTS purchase_orders (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            supplier_id INTEGER NOT NULL,
+            status TEXT NOT NULL DEFAULT 'Pending',
+            order_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            received_date TIMESTAMP,
+            notes TEXT,
+            created_by TEXT,
+            total INTEGER NOT NULL DEFAULT 0,
+            CHECK (status IN ('Pending', 'Received', 'Cancelled')),
+            FOREIGN KEY (supplier_id) REFERENCES suppliers(id)
+        )
+    )";
+    // Purchase order line items
+    queries << R"(
+        CREATE TABLE IF NOT EXISTS purchase_order_items (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            po_id INTEGER NOT NULL,
+            product_id INTEGER NOT NULL,
+            product_name TEXT NOT NULL,
+            quantity INTEGER NOT NULL,
+            unit_cost INTEGER NOT NULL,
+            subtotal INTEGER NOT NULL,
+            FOREIGN KEY (po_id) REFERENCES purchase_orders(id),
+            FOREIGN KEY (product_id) REFERENCES products(id)
+        )
+    )";
+    queries << "CREATE INDEX IF NOT EXISTS idx_po_supplier ON purchase_orders(supplier_id)";
+    queries << "CREATE INDEX IF NOT EXISTS idx_po_status ON purchase_orders(status)";
+    queries << "CREATE INDEX IF NOT EXISTS idx_po_items_po ON purchase_order_items(po_id)";
+    // Expense categories
+    queries << R"(
+        CREATE TABLE IF NOT EXISTS expense_categories (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            name TEXT UNIQUE NOT NULL,
+            is_active INTEGER DEFAULT 1
+        )
+    )";
+    // Expenses
+    queries << R"(
+        CREATE TABLE IF NOT EXISTS expenses (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            category_id INTEGER NOT NULL,
+            amount INTEGER NOT NULL,
+            description TEXT,
+            date TEXT NOT NULL,
+            recorded_by TEXT,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (category_id) REFERENCES expense_categories(id)
+        )
+    )";
+    queries << "CREATE INDEX IF NOT EXISTS idx_expenses_date ON expenses(date)";
+    queries << "CREATE INDEX IF NOT EXISTS idx_expenses_category ON expenses(category_id)";
+    // Customers
+    queries << R"(
+        CREATE TABLE IF NOT EXISTS customers (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            name TEXT NOT NULL,
+            phone TEXT UNIQUE,
+            email TEXT,
+            address TEXT,
+            loyalty_points INTEGER DEFAULT 0,
+            store_credit INTEGER DEFAULT 0,
+            is_active INTEGER DEFAULT 1,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    )";
+    queries << "CREATE INDEX IF NOT EXISTS idx_customers_phone ON customers(phone)";
 
     // Execute all queries
     for (const QString &queryStr : queries) {
@@ -302,10 +385,12 @@ bool Database::createTables()
 
     // Migrations for databases created before these columns existed
     // (CREATE TABLE IF NOT EXISTS does not alter existing tables)
-    ensureColumn("sales", "amount_paid", "INTEGER DEFAULT 0");
-    ensureColumn("sales", "change_due", "INTEGER DEFAULT 0");
+    ensureColumn("sales", "amount_paid",        "INTEGER DEFAULT 0");
+    ensureColumn("sales", "change_due",         "INTEGER DEFAULT 0");
+    ensureColumn("sales", "customer_id",        "INTEGER DEFAULT 0");
+    ensureColumn("sales", "store_credit_used",  "INTEGER DEFAULT 0");
     ensureColumn("users", "must_change_password", "INTEGER DEFAULT 0");
-    ensureColumn("products", "reorder_level", "INTEGER NOT NULL DEFAULT 20");
+    ensureColumn("products", "reorder_level",   "INTEGER NOT NULL DEFAULT 20");
 
     if (!migrateMoneyToCents())
         return false;
@@ -709,7 +794,8 @@ int Database::getStock(int productId)
 int Database::recordSale(const QVector<SaleItem> &items,
                          Money subtotal, Money tax, Money discount, Money total,
                          const QString &paymentMethod,
-                         Money amountPaid, Money changeDue)
+                         Money amountPaid, Money changeDue,
+                         int customerId, Money storeCreditUsed)
 {
     if (items.isEmpty()) {
         lastError = "Cannot record a sale with no items";
@@ -741,9 +827,28 @@ int Database::recordSale(const QVector<SaleItem> &items,
         }
     }
 
+    // Validate customer store-credit before touching anything
+    if (customerId > 0 && storeCreditUsed.cents() > 0) {
+        QSqlQuery creditCheck(db);
+        creditCheck.prepare("SELECT store_credit FROM customers WHERE id = ? AND is_active = 1");
+        creditCheck.addBindValue(customerId);
+        if (!creditCheck.exec() || !creditCheck.next()) {
+            lastError = "Customer not found";
+            db.rollback();
+            return -1;
+        }
+        if (creditCheck.value(0).toLongLong() < storeCreditUsed.cents()) {
+            lastError = "Insufficient store credit";
+            db.rollback();
+            return -1;
+        }
+    }
+
     QSqlQuery saleQuery(db);
-    saleQuery.prepare("INSERT INTO sales (subtotal, tax, discount, total, payment_method, amount_paid, change_due) "
-                      "VALUES (?, ?, ?, ?, ?, ?, ?)");
+    saleQuery.prepare("INSERT INTO sales "
+                      "(subtotal, tax, discount, total, payment_method, "
+                      " amount_paid, change_due, customer_id, store_credit_used) "
+                      "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)");
     saleQuery.addBindValue(subtotal.cents());
     saleQuery.addBindValue(tax.cents());
     saleQuery.addBindValue(discount.cents());
@@ -751,6 +856,8 @@ int Database::recordSale(const QVector<SaleItem> &items,
     saleQuery.addBindValue(paymentMethod);
     saleQuery.addBindValue(amountPaid.cents());
     saleQuery.addBindValue(changeDue.cents());
+    saleQuery.addBindValue(customerId > 0 ? customerId : QVariant(QMetaType(QMetaType::Int)));
+    saleQuery.addBindValue(storeCreditUsed.cents());
     if (!saleQuery.exec()) {
         lastError = saleQuery.lastError().text();
         db.rollback();
@@ -760,7 +867,8 @@ int Database::recordSale(const QVector<SaleItem> &items,
 
     for (const SaleItem &item : items) {
         QSqlQuery itemQuery(db);
-        itemQuery.prepare("INSERT INTO sale_items (sale_id, product_id, product_name, quantity, price, cost_price, subtotal) "
+        itemQuery.prepare("INSERT INTO sale_items "
+                          "(sale_id, product_id, product_name, quantity, price, cost_price, subtotal) "
                           "VALUES (?, ?, ?, ?, ?, ?, ?)");
         itemQuery.addBindValue(saleId);
         itemQuery.addBindValue(item.productId);
@@ -781,6 +889,26 @@ int Database::recordSale(const QVector<SaleItem> &items,
         stockUpdate.addBindValue(item.productId);
         if (!stockUpdate.exec()) {
             lastError = stockUpdate.lastError().text();
+            db.rollback();
+            return -1;
+        }
+    }
+
+    // Customer loyalty + store credit update — inside the same transaction so
+    // point accrual and credit deduction are always consistent with the sale.
+    if (customerId > 0) {
+        // 1 point per 100 KSh (10 000 cents) spent, rounded down.
+        const int pointsEarned = static_cast<int>(total.cents() / 10000);
+        QSqlQuery custUpdate(db);
+        custUpdate.prepare("UPDATE customers SET "
+                           "loyalty_points = loyalty_points + ?, "
+                           "store_credit   = store_credit   - ? "
+                           "WHERE id = ?");
+        custUpdate.addBindValue(pointsEarned);
+        custUpdate.addBindValue(storeCreditUsed.cents());
+        custUpdate.addBindValue(customerId);
+        if (!custUpdate.exec()) {
+            lastError = "Failed to update customer: " + custUpdate.lastError().text();
             db.rollback();
             return -1;
         }
@@ -1046,6 +1174,701 @@ bool Database::isRefunded(int saleId) const
     if (q.exec() && q.next())
         return q.value(0).toInt() > 0;
     return false;
+}
+
+// ==================== Suppliers ====================
+
+QVector<Supplier> Database::getAllSuppliers(bool includeInactive)
+{
+    QVector<Supplier> suppliers;
+    QSqlQuery query(db);
+    query.exec(includeInactive
+                   ? "SELECT id, name, contact_person, phone, email, address, is_active "
+                     "FROM suppliers ORDER BY name"
+                   : "SELECT id, name, contact_person, phone, email, address, is_active "
+                     "FROM suppliers WHERE is_active = 1 ORDER BY name");
+    while (query.next()) {
+        Supplier s;
+        s.id            = query.value(0).toInt();
+        s.name          = query.value(1).toString();
+        s.contactPerson = query.value(2).toString();
+        s.phone         = query.value(3).toString();
+        s.email         = query.value(4).toString();
+        s.address       = query.value(5).toString();
+        s.isActive      = query.value(6).toBool();
+        suppliers.append(s);
+    }
+    return suppliers;
+}
+
+Supplier Database::getSupplierById(int id)
+{
+    Supplier s;
+    QSqlQuery query(db);
+    query.prepare("SELECT id, name, contact_person, phone, email, address, is_active "
+                  "FROM suppliers WHERE id = ?");
+    query.addBindValue(id);
+    if (query.exec() && query.next()) {
+        s.id            = query.value(0).toInt();
+        s.name          = query.value(1).toString();
+        s.contactPerson = query.value(2).toString();
+        s.phone         = query.value(3).toString();
+        s.email         = query.value(4).toString();
+        s.address       = query.value(5).toString();
+        s.isActive      = query.value(6).toBool();
+    }
+    return s;
+}
+
+bool Database::addSupplier(const Supplier &supplier)
+{
+    QSqlQuery query(db);
+    query.prepare("INSERT INTO suppliers (name, contact_person, phone, email, address, is_active) "
+                  "VALUES (?, ?, ?, ?, ?, ?)");
+    query.addBindValue(supplier.name);
+    query.addBindValue(supplier.contactPerson);
+    query.addBindValue(supplier.phone);
+    query.addBindValue(supplier.email);
+    query.addBindValue(supplier.address);
+    query.addBindValue(supplier.isActive);
+    if (!query.exec()) {
+        lastError = "Failed to add supplier: " + query.lastError().text();
+        return false;
+    }
+    return true;
+}
+
+bool Database::updateSupplier(const Supplier &supplier)
+{
+    QSqlQuery query(db);
+    query.prepare("UPDATE suppliers SET name = ?, contact_person = ?, phone = ?, "
+                  "email = ?, address = ?, is_active = ? WHERE id = ?");
+    query.addBindValue(supplier.name);
+    query.addBindValue(supplier.contactPerson);
+    query.addBindValue(supplier.phone);
+    query.addBindValue(supplier.email);
+    query.addBindValue(supplier.address);
+    query.addBindValue(supplier.isActive);
+    query.addBindValue(supplier.id);
+    if (!query.exec()) {
+        lastError = "Failed to update supplier: " + query.lastError().text();
+        return false;
+    }
+    return true;
+}
+
+bool Database::deactivateSupplier(int id)
+{
+    QSqlQuery query(db);
+    query.prepare("UPDATE suppliers SET is_active = 0 WHERE id = ?");
+    query.addBindValue(id);
+    if (!query.exec()) {
+        lastError = "Failed to deactivate supplier: " + query.lastError().text();
+        return false;
+    }
+    return true;
+}
+
+// ==================== Purchase Orders ====================
+
+int Database::createPurchaseOrder(int supplierId, const QVector<PurchaseOrderItem> &items,
+                                   const QString &notes, const QString &createdBy)
+{
+    if (items.isEmpty()) {
+        lastError = "Cannot create a purchase order with no items";
+        return -1;
+    }
+
+    if (!db.transaction()) {
+        lastError = "Failed to start transaction: " + db.lastError().text();
+        return -1;
+    }
+
+    qint64 totalCents = 0;
+    for (const PurchaseOrderItem &item : items)
+        totalCents += item.subtotal.cents();
+
+    QSqlQuery poQuery(db);
+    poQuery.prepare("INSERT INTO purchase_orders (supplier_id, status, notes, created_by, total) "
+                    "VALUES (?, 'Pending', ?, ?, ?)");
+    poQuery.addBindValue(supplierId);
+    poQuery.addBindValue(notes);
+    poQuery.addBindValue(createdBy);
+    poQuery.addBindValue(totalCents);
+    if (!poQuery.exec()) {
+        lastError = "Failed to create purchase order: " + poQuery.lastError().text();
+        db.rollback();
+        return -1;
+    }
+    const int poId = poQuery.lastInsertId().toInt();
+
+    for (const PurchaseOrderItem &item : items) {
+        QSqlQuery itemQuery(db);
+        itemQuery.prepare("INSERT INTO purchase_order_items "
+                          "(po_id, product_id, product_name, quantity, unit_cost, subtotal) "
+                          "VALUES (?, ?, ?, ?, ?, ?)");
+        itemQuery.addBindValue(poId);
+        itemQuery.addBindValue(item.productId);
+        itemQuery.addBindValue(item.productName);
+        itemQuery.addBindValue(item.quantity);
+        itemQuery.addBindValue(item.unitCost.cents());
+        itemQuery.addBindValue(item.subtotal.cents());
+        if (!itemQuery.exec()) {
+            lastError = "Failed to add purchase order item: " + itemQuery.lastError().text();
+            db.rollback();
+            return -1;
+        }
+    }
+
+    if (!db.commit()) {
+        lastError = "Failed to commit purchase order: " + db.lastError().text();
+        db.rollback();
+        return -1;
+    }
+    return poId;
+}
+
+// Shared row->struct mapping for the two list queries below (kept private to
+// this translation unit; not worth a header declaration for one-line callers).
+static PurchaseOrder poFromQuery(QSqlQuery &query)
+{
+    PurchaseOrder po;
+    po.id           = query.value(0).toInt();
+    po.supplierId   = query.value(1).toInt();
+    po.supplierName = query.value(2).toString();
+    po.status       = query.value(3).toString();
+    po.orderDate    = query.value(4).toString();
+    po.receivedDate = query.value(5).toString();
+    po.notes        = query.value(6).toString();
+    po.createdBy    = query.value(7).toString();
+    po.total        = Money::fromCents(query.value(8).toLongLong());
+    return po;
+}
+
+QVector<PurchaseOrder> Database::getAllPurchaseOrders()
+{
+    QVector<PurchaseOrder> orders;
+    QSqlQuery query(db);
+    query.exec("SELECT po.id, po.supplier_id, s.name, po.status, po.order_date, "
+              "po.received_date, po.notes, po.created_by, po.total "
+              "FROM purchase_orders po JOIN suppliers s ON s.id = po.supplier_id "
+              "ORDER BY po.order_date DESC");
+    while (query.next())
+        orders.append(poFromQuery(query));
+    return orders;
+}
+
+QVector<PurchaseOrder> Database::getPurchaseOrdersBySupplier(int supplierId)
+{
+    QVector<PurchaseOrder> orders;
+    QSqlQuery query(db);
+    query.prepare("SELECT po.id, po.supplier_id, s.name, po.status, po.order_date, "
+                  "po.received_date, po.notes, po.created_by, po.total "
+                  "FROM purchase_orders po JOIN suppliers s ON s.id = po.supplier_id "
+                  "WHERE po.supplier_id = ? ORDER BY po.order_date DESC");
+    query.addBindValue(supplierId);
+    if (query.exec()) {
+        while (query.next())
+            orders.append(poFromQuery(query));
+    }
+    return orders;
+}
+
+PurchaseOrder Database::getPurchaseOrderById(int id)
+{
+    PurchaseOrder po;
+    QSqlQuery query(db);
+    query.prepare("SELECT po.id, po.supplier_id, s.name, po.status, po.order_date, "
+                  "po.received_date, po.notes, po.created_by, po.total "
+                  "FROM purchase_orders po JOIN suppliers s ON s.id = po.supplier_id "
+                  "WHERE po.id = ?");
+    query.addBindValue(id);
+    if (query.exec() && query.next())
+        po = poFromQuery(query);
+    return po;
+}
+
+QVector<PurchaseOrderItem> Database::getPurchaseOrderItems(int poId)
+{
+    QVector<PurchaseOrderItem> items;
+    QSqlQuery query(db);
+    query.prepare("SELECT id, po_id, product_id, product_name, quantity, unit_cost, subtotal "
+                  "FROM purchase_order_items WHERE po_id = ?");
+    query.addBindValue(poId);
+    if (query.exec()) {
+        while (query.next()) {
+            PurchaseOrderItem item;
+            item.id          = query.value(0).toInt();
+            item.poId        = query.value(1).toInt();
+            item.productId   = query.value(2).toInt();
+            item.productName = query.value(3).toString();
+            item.quantity    = query.value(4).toInt();
+            item.unitCost     = Money::fromCents(query.value(5).toLongLong());
+            item.subtotal     = Money::fromCents(query.value(6).toLongLong());
+            items.append(item);
+        }
+    }
+    return items;
+}
+
+bool Database::receivePurchaseOrder(int poId, const QString &receivedBy)
+{
+    if (!db.transaction()) {
+        lastError = "Failed to start transaction: " + db.lastError().text();
+        return false;
+    }
+
+    QSqlQuery statusQuery(db);
+    statusQuery.prepare("SELECT status FROM purchase_orders WHERE id = ?");
+    statusQuery.addBindValue(poId);
+    if (!statusQuery.exec() || !statusQuery.next()) {
+        lastError = "Purchase order not found";
+        db.rollback();
+        return false;
+    }
+    if (statusQuery.value(0).toString() != "Pending") {
+        lastError = "Purchase order is not pending — already received or cancelled";
+        db.rollback();
+        return false;
+    }
+
+    QSqlQuery itemsQuery(db);
+    itemsQuery.prepare("SELECT product_id, product_name, quantity, unit_cost "
+                       "FROM purchase_order_items WHERE po_id = ?");
+    itemsQuery.addBindValue(poId);
+    if (!itemsQuery.exec()) {
+        lastError = "Failed to read purchase order items: " + itemsQuery.lastError().text();
+        db.rollback();
+        return false;
+    }
+
+    struct Line { int productId; QString name; int qty; qint64 unitCostCents; };
+    QVector<Line> lines;
+    while (itemsQuery.next()) {
+        lines.append({ itemsQuery.value(0).toInt(), itemsQuery.value(1).toString(),
+                       itemsQuery.value(2).toInt(), itemsQuery.value(3).toLongLong() });
+    }
+
+    for (const Line &line : lines) {
+        QSqlQuery stockQuery(db);
+        stockQuery.prepare("SELECT stock_quantity FROM products WHERE id = ?");
+        stockQuery.addBindValue(line.productId);
+        if (!stockQuery.exec() || !stockQuery.next()) {
+            lastError = "Product not found: " + line.name;
+            db.rollback();
+            return false;
+        }
+        const int oldQty = stockQuery.value(0).toInt();
+        const int newQty = oldQty + line.qty;
+
+        // Receiving updates stock AND the product's cost basis to the PO's
+        // unit cost (latest-cost, not weighted-average — simple and matches
+        // how the rest of the app treats cost_price as "current cost").
+        QSqlQuery updateQuery(db);
+        updateQuery.prepare("UPDATE products SET stock_quantity = ?, cost_price = ? WHERE id = ?");
+        updateQuery.addBindValue(newQty);
+        updateQuery.addBindValue(line.unitCostCents);
+        updateQuery.addBindValue(line.productId);
+        if (!updateQuery.exec()) {
+            lastError = "Failed to update stock for " + line.name + ": " + updateQuery.lastError().text();
+            db.rollback();
+            return false;
+        }
+
+        if (!logStockAdjustment(line.productId, line.name, oldQty, newQty,
+                                QString("PO #%1 Receipt").arg(poId), receivedBy)) {
+            lastError = "Failed to log stock adjustment for " + line.name;
+            db.rollback();
+            return false;
+        }
+    }
+
+    QSqlQuery finishQuery(db);
+    finishQuery.prepare("UPDATE purchase_orders SET status = 'Received', "
+                        "received_date = CURRENT_TIMESTAMP WHERE id = ?");
+    finishQuery.addBindValue(poId);
+    if (!finishQuery.exec()) {
+        lastError = "Failed to finalize purchase order: " + finishQuery.lastError().text();
+        db.rollback();
+        return false;
+    }
+
+    if (!db.commit()) {
+        lastError = "Failed to commit purchase order receipt: " + db.lastError().text();
+        db.rollback();
+        return false;
+    }
+    return true;
+}
+
+bool Database::cancelPurchaseOrder(int poId)
+{
+    QSqlQuery query(db);
+    query.prepare("UPDATE purchase_orders SET status = 'Cancelled' WHERE id = ? AND status = 'Pending'");
+    query.addBindValue(poId);
+    if (!query.exec()) {
+        lastError = "Failed to cancel purchase order: " + query.lastError().text();
+        return false;
+    }
+    if (query.numRowsAffected() == 0) {
+        lastError = "Purchase order is not pending — cannot cancel";
+        return false;
+    }
+    return true;
+}
+
+// ==================== Expense Categories ====================
+
+QVector<ExpenseCategory> Database::getAllExpenseCategories(bool includeInactive)
+{
+    QVector<ExpenseCategory> cats;
+    QSqlQuery q(db);
+    q.exec(includeInactive
+               ? "SELECT id, name, is_active FROM expense_categories ORDER BY name"
+               : "SELECT id, name, is_active FROM expense_categories WHERE is_active=1 ORDER BY name");
+    while (q.next()) {
+        ExpenseCategory c;
+        c.id       = q.value(0).toInt();
+        c.name     = q.value(1).toString();
+        c.isActive = q.value(2).toBool();
+        cats.append(c);
+    }
+    return cats;
+}
+
+bool Database::addExpenseCategory(const QString &name)
+{
+    QSqlQuery q(db);
+    q.prepare("INSERT INTO expense_categories (name) VALUES (?)");
+    q.addBindValue(name.trimmed());
+    if (!q.exec()) {
+        lastError = "Failed to add expense category: " + q.lastError().text();
+        return false;
+    }
+    return true;
+}
+
+bool Database::deactivateExpenseCategory(int id)
+{
+    QSqlQuery q(db);
+    q.prepare("UPDATE expense_categories SET is_active = 0 WHERE id = ?");
+    q.addBindValue(id);
+    if (!q.exec()) {
+        lastError = "Failed to deactivate category: " + q.lastError().text();
+        return false;
+    }
+    return true;
+}
+
+// ==================== Expenses ====================
+
+bool Database::addExpense(const Expense &expense)
+{
+    QSqlQuery q(db);
+    q.prepare("INSERT INTO expenses (category_id, amount, description, date, recorded_by) "
+              "VALUES (?, ?, ?, ?, ?)");
+    q.addBindValue(expense.categoryId);
+    q.addBindValue(expense.amount.cents());
+    q.addBindValue(expense.description);
+    q.addBindValue(expense.date);
+    q.addBindValue(expense.recordedBy);
+    if (!q.exec()) {
+        lastError = "Failed to record expense: " + q.lastError().text();
+        return false;
+    }
+    return true;
+}
+
+static Expense expenseFromQuery(QSqlQuery &q)
+{
+    Expense e;
+    e.id           = q.value(0).toInt();
+    e.categoryId   = q.value(1).toInt();
+    e.categoryName = q.value(2).toString();
+    e.amount       = Money::fromCents(q.value(3).toLongLong());
+    e.description  = q.value(4).toString();
+    e.date         = q.value(5).toString();
+    e.recordedBy   = q.value(6).toString();
+    e.createdAt    = q.value(7).toString();
+    return e;
+}
+
+static const char *expenseJoin =
+    "SELECT e.id, e.category_id, c.name, e.amount, e.description, "
+    "       e.date, e.recorded_by, e.created_at "
+    "FROM expenses e JOIN expense_categories c ON c.id = e.category_id ";
+
+QVector<Expense> Database::getAllExpenses()
+{
+    QVector<Expense> list;
+    QSqlQuery q(db);
+    q.exec(QString(expenseJoin) + "ORDER BY e.date DESC, e.created_at DESC");
+    while (q.next())
+        list.append(expenseFromQuery(q));
+    return list;
+}
+
+QVector<Expense> Database::getExpensesByDateRange(const QString &start, const QString &end)
+{
+    QVector<Expense> list;
+    QSqlQuery q(db);
+    q.prepare(QString(expenseJoin) + "WHERE e.date BETWEEN ? AND ? ORDER BY e.date DESC");
+    q.addBindValue(start);
+    q.addBindValue(end);
+    if (q.exec()) {
+        while (q.next())
+            list.append(expenseFromQuery(q));
+    }
+    return list;
+}
+
+Money Database::getTotalExpenses(const QString &start, const QString &end)
+{
+    QSqlQuery q(db);
+    q.prepare("SELECT COALESCE(SUM(amount), 0) FROM expenses WHERE date BETWEEN ? AND ?");
+    q.addBindValue(start);
+    q.addBindValue(end);
+    if (q.exec() && q.next())
+        return Money::fromCents(q.value(0).toLongLong());
+    return Money::fromCents(0);
+}
+
+// ==================== Customers ====================
+
+static Customer customerFromQuery(QSqlQuery &q)
+{
+    Customer c;
+    c.id            = q.value(0).toInt();
+    c.name          = q.value(1).toString();
+    c.phone         = q.value(2).toString();
+    c.email         = q.value(3).toString();
+    c.address       = q.value(4).toString();
+    c.loyaltyPoints = q.value(5).toInt();
+    c.storeCredit   = Money::fromCents(q.value(6).toLongLong());
+    c.isActive      = q.value(7).toBool();
+    c.createdAt     = q.value(8).toString();
+    return c;
+}
+
+static const char *customerSelect =
+    "SELECT id, name, phone, email, address, loyalty_points, store_credit, "
+    "       is_active, created_at FROM customers ";
+
+QVector<Customer> Database::getAllCustomers(bool includeInactive)
+{
+    QVector<Customer> list;
+    QSqlQuery q(db);
+    q.exec(QString(customerSelect)
+           + (includeInactive ? "" : "WHERE is_active = 1 ")
+           + "ORDER BY name");
+    while (q.next())
+        list.append(customerFromQuery(q));
+    return list;
+}
+
+Customer Database::getCustomerById(int id)
+{
+    QSqlQuery q(db);
+    q.prepare(QString(customerSelect) + "WHERE id = ?");
+    q.addBindValue(id);
+    if (q.exec() && q.next())
+        return customerFromQuery(q);
+    return Customer{};
+}
+
+Customer Database::getCustomerByPhone(const QString &phone)
+{
+    QSqlQuery q(db);
+    q.prepare(QString(customerSelect) + "WHERE phone = ? AND is_active = 1");
+    q.addBindValue(phone.trimmed());
+    if (q.exec() && q.next())
+        return customerFromQuery(q);
+    return Customer{};
+}
+
+bool Database::addCustomer(const Customer &customer)
+{
+    QSqlQuery q(db);
+    q.prepare("INSERT INTO customers (name, phone, email, address) VALUES (?, ?, ?, ?)");
+    q.addBindValue(customer.name);
+    q.addBindValue(customer.phone.isEmpty() ? QVariant(QMetaType(QMetaType::QString)) : customer.phone);
+    q.addBindValue(customer.email);
+    q.addBindValue(customer.address);
+    if (!q.exec()) {
+        lastError = "Failed to add customer: " + q.lastError().text();
+        return false;
+    }
+    return true;
+}
+
+bool Database::updateCustomer(const Customer &customer)
+{
+    QSqlQuery q(db);
+    q.prepare("UPDATE customers SET name=?, phone=?, email=?, address=? WHERE id=?");
+    q.addBindValue(customer.name);
+    q.addBindValue(customer.phone.isEmpty() ? QVariant(QMetaType(QMetaType::QString)) : customer.phone);
+    q.addBindValue(customer.email);
+    q.addBindValue(customer.address);
+    q.addBindValue(customer.id);
+    if (!q.exec()) {
+        lastError = "Failed to update customer: " + q.lastError().text();
+        return false;
+    }
+    return true;
+}
+
+bool Database::deactivateCustomer(int id)
+{
+    QSqlQuery q(db);
+    q.prepare("UPDATE customers SET is_active = 0 WHERE id = ?");
+    q.addBindValue(id);
+    if (!q.exec()) {
+        lastError = "Failed to deactivate customer: " + q.lastError().text();
+        return false;
+    }
+    return true;
+}
+
+bool Database::adjustStoreCredit(int customerId, Money delta, const QString &reason)
+{
+    Q_UNUSED(reason)   // available for a future audit log
+    QSqlQuery q(db);
+    q.prepare("UPDATE customers SET store_credit = store_credit + ? WHERE id = ?");
+    q.addBindValue(delta.cents());
+    q.addBindValue(customerId);
+    if (!q.exec()) {
+        lastError = "Failed to adjust store credit: " + q.lastError().text();
+        return false;
+    }
+    return true;
+}
+
+QVector<Sale> Database::getCustomerPurchaseHistory(int customerId)
+{
+    QVector<Sale> sales;
+    QSqlQuery q(db);
+    q.prepare("SELECT id, sale_date, subtotal, tax, discount, total, "
+              "payment_method, amount_paid, change_due "
+              "FROM sales WHERE customer_id = ? ORDER BY sale_date DESC");
+    q.addBindValue(customerId);
+    if (!q.exec()) return sales;
+    while (q.next()) {
+        Sale s;
+        s.id            = q.value(0).toInt();
+        s.saleDate      = q.value(1).toString();
+        s.subtotal      = Money::fromCents(q.value(2).toLongLong());
+        s.tax           = Money::fromCents(q.value(3).toLongLong());
+        s.discount      = Money::fromCents(q.value(4).toLongLong());
+        s.total         = Money::fromCents(q.value(5).toLongLong());
+        s.paymentMethod = q.value(6).toString();
+        s.amountPaid    = Money::fromCents(q.value(7).toLongLong());
+        s.changeDue     = Money::fromCents(q.value(8).toLongLong());
+        sales.append(s);
+    }
+    return sales;
+}
+
+// =============================================================================
+// P&L, Stock Valuation, Loyalty Redemption
+// =============================================================================
+
+QVector<Database::ProfitLossRow> Database::getProfitLossByDateRange(
+    const QString &start, const QString &end)
+{
+    // Revenue + COGS grouped by day from sales/sale_items
+    QMap<QString, ProfitLossRow> rows;
+
+    QSqlQuery q(db);
+    q.prepare(
+        "SELECT substr(s.sale_date,1,10) AS day, "
+        "       SUM(s.total)             AS revenue, "
+        "       SUM(si.quantity * si.cost_price) AS cogs "
+        "FROM sales s "
+        "JOIN sale_items si ON si.sale_id = s.id "
+        "WHERE substr(s.sale_date,1,10) BETWEEN ? AND ? "
+        "GROUP BY day ORDER BY day");
+    q.addBindValue(start);
+    q.addBindValue(end);
+    if (q.exec()) {
+        while (q.next()) {
+            ProfitLossRow r;
+            r.date    = q.value(0).toString();
+            r.revenue = Money::fromCents(q.value(1).toLongLong());
+            r.cogs    = Money::fromCents(q.value(2).toLongLong());
+            rows[r.date] = r;
+        }
+    }
+
+    // Expenses grouped by day
+    QSqlQuery eq(db);
+    eq.prepare(
+        "SELECT date, SUM(amount) FROM expenses "
+        "WHERE date BETWEEN ? AND ? GROUP BY date");
+    eq.addBindValue(start);
+    eq.addBindValue(end);
+    if (eq.exec()) {
+        while (eq.next()) {
+            const QString day = eq.value(0).toString();
+            rows[day].date     = day;
+            rows[day].expenses = Money::fromCents(eq.value(1).toLongLong());
+        }
+    }
+
+    QVector<ProfitLossRow> result;
+    result.reserve(rows.size());
+    for (const auto &r : std::as_const(rows))
+        result.append(r);
+    return result;
+}
+
+QVector<Database::StockValuationRow> Database::getStockValuation()
+{
+    QVector<StockValuationRow> rows;
+    QSqlQuery q(db);
+    q.prepare(
+        "SELECT name, category, stock_quantity, cost_price "
+        "FROM products WHERE is_active = 1 ORDER BY category, name");
+    if (!q.exec()) return rows;
+    while (q.next()) {
+        StockValuationRow r;
+        r.productName = q.value(0).toString();
+        r.category    = q.value(1).toString();
+        r.qty         = q.value(2).toInt();
+        r.costPrice   = Money::fromCents(q.value(3).toLongLong());
+        rows.append(r);
+    }
+    return rows;
+}
+
+bool Database::redeemLoyaltyPoints(int customerId, int pointsToRedeem,
+                                   Money creditValue)
+{
+    // Verify customer has enough points
+    QSqlQuery check(db);
+    check.prepare("SELECT loyalty_points FROM customers WHERE id = ?");
+    check.addBindValue(customerId);
+    if (!check.exec() || !check.next()) {
+        lastError = "Customer not found";
+        return false;
+    }
+    if (check.value(0).toInt() < pointsToRedeem) {
+        lastError = "Insufficient loyalty points";
+        return false;
+    }
+
+    QSqlQuery q(db);
+    q.prepare("UPDATE customers SET "
+              "loyalty_points = loyalty_points - ?, "
+              "store_credit   = store_credit   + ? "
+              "WHERE id = ?");
+    q.addBindValue(pointsToRedeem);
+    q.addBindValue(creditValue.cents());
+    q.addBindValue(customerId);
+    if (!q.exec()) {
+        lastError = "Failed to redeem loyalty points: " + q.lastError().text();
+        return false;
+    }
+    return true;
 }
 
 // ==================== Backup ====================

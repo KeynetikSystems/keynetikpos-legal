@@ -117,6 +117,67 @@ void PaymentDialog::setupUI()
     changeLabel->setProperty("bold", "true");
     amountLayout->addWidget(changeLabel);
 
+    // Loyalty points row — shown only when customer has points
+    loyaltyLabel = new QLabel();
+    loyaltyLabel->setProperty("role", "banner");
+    loyaltyLabel->setProperty("kind", "secondary");
+    loyaltyLabel->hide();
+    amountLayout->addWidget(loyaltyLabel);
+
+    redeemPointsButton = new QPushButton("Redeem Points (100 pts = KSh 10)");
+    redeemPointsButton->setProperty("kind", "info");
+    redeemPointsButton->hide();
+    connect(redeemPointsButton, &QPushButton::clicked, this, [this]() {
+        // Redeem ALL available points; cap at outstanding total
+        const int availPts      = m_customer.loyaltyPoints;
+        const Money creditPerPt = Money::fromCents(10); // 100 pts = KSh10 = 1000c → 10c/pt
+        const Money maxCredit   = creditPerPt * availPts;
+        const Money outstanding = Money::fromMajor(std::max(0.0, total));
+        const Money applied     = maxCredit.cents() >= outstanding.cents()
+                                      ? outstanding : maxCredit;
+        m_pointsRedeemed = static_cast<int>(applied.cents() / creditPerPt.cents());
+        const double newTotal = std::max(0.0, total - applied.toMajor());
+        amountPaidSpin->setValue(newTotal);
+        this->total = newTotal;
+        loyaltyLabel->setText(
+            QString("Redeemed %1 pts → %2 off  (remaining: %3 pts)")
+                .arg(m_pointsRedeemed)
+                .arg(formatMoney(applied))
+                .arg(availPts - m_pointsRedeemed));
+        redeemPointsButton->setEnabled(false);
+        calculateChange();
+    });
+    amountLayout->addWidget(redeemPointsButton);
+
+    // Store credit row — shown only when a customer is attached via setCustomer()
+    creditAvailableLabel = new QLabel();
+    creditAvailableLabel->setProperty("role", "banner");
+    creditAvailableLabel->setProperty("kind", "info");
+    creditAvailableLabel->hide();
+    amountLayout->addWidget(creditAvailableLabel);
+
+    applyCreditButton = new QPushButton("Apply Store Credit");
+    applyCreditButton->setProperty("kind", "info");
+    applyCreditButton->hide();
+    connect(applyCreditButton, &QPushButton::clicked, this, [this]() {
+        // Deduct up to the full available credit from the outstanding total.
+        const Money available = m_customer.storeCredit - m_storeCreditUsed;
+        const Money outstanding = Money::fromMajor(
+            std::max(0.0, total - m_storeCreditUsed.toMajor()));
+        m_storeCreditUsed = available.cents() >= outstanding.cents()
+                                ? outstanding : available;
+        const double newTotal = std::max(0.0, total - m_storeCreditUsed.toMajor());
+        amountPaidSpin->setValue(newTotal);
+        this->total = newTotal;
+        creditAvailableLabel->setText(
+            QString("Store credit applied: %1  (balance after: %2)")
+                .arg(formatMoney(m_storeCreditUsed))
+                .arg(formatMoney(m_customer.storeCredit - m_storeCreditUsed)));
+        applyCreditButton->setEnabled(false);
+        calculateChange();
+    });
+    amountLayout->addWidget(applyCreditButton);
+
     mainLayout->addWidget(amountGroup);
 
     mainLayout->addSpacing(20);
@@ -237,10 +298,37 @@ void PaymentDialog::onConfirmClicked()
     accept();
 }
 
+void PaymentDialog::setCustomer(const Customer &customer)
+{
+    m_customer    = customer;
+    m_hasCustomer = customer.id > 0;
+    if (!m_hasCustomer) return;
+
+    if (customer.loyaltyPoints > 0) {
+        loyaltyLabel->setText(
+            QString("Customer: %1  |  Loyalty Points: %2 (worth %3)")
+                .arg(customer.name)
+                .arg(customer.loyaltyPoints)
+                .arg(formatMoney(Money::fromCents(customer.loyaltyPoints * 10LL))));
+        loyaltyLabel->show();
+        redeemPointsButton->show();
+        redeemPointsButton->setEnabled(true);
+    }
+
+    if (!customer.storeCredit.isZero()) {
+        creditAvailableLabel->setText(
+            QString("Customer: %1  |  Store Credit Available: %2")
+                .arg(customer.name, formatMoney(customer.storeCredit)));
+        creditAvailableLabel->show();
+        applyCreditButton->show();
+        applyCreditButton->setEnabled(true);
+    }
+}
+
 QString PaymentDialog::getPaymentMethod()   const { return paymentMethod; }
 Money   PaymentDialog::getAmountPaid()      const { return Money::fromMajor(amountPaid); }
 Money   PaymentDialog::getChange()          const { return Money::fromMajor(change);     }
-QString PaymentDialog::getReferenceNumber() const
-{
-    return referenceEdit->text().trimmed();
-}
+Money   PaymentDialog::getStoreCreditUsed()       const { return m_storeCreditUsed; }
+int     PaymentDialog::getCustomerId()            const { return m_hasCustomer ? m_customer.id : 0; }
+int     PaymentDialog::getLoyaltyPointsRedeemed() const { return m_pointsRedeemed; }
+QString PaymentDialog::getReferenceNumber()       const { return referenceEdit->text().trimmed(); }

@@ -15,6 +15,7 @@
 // =============================================================================
 #include "licensemanager.h"
 #include <QSettings>
+#include <QJsonArray>
 #include <QCryptographicHash>
 #include <QDateTime>
 #include <QNetworkAccessManager>
@@ -116,6 +117,53 @@ int LicenseManager::readOfflineDays() const {
 void LicenseManager::writeOfflineDays(int days) const {
     QSettings s(QSettings::NativeFormat, QSettings::UserScope, REG_ORG, REG_APP);
     s.setValue("License/OfflineDays", days);
+}
+
+// ════════════════════════════════════════════════════════════════
+// TIER / FEATURE REGISTRY HELPERS
+// Not covered by the integrity hash — the server is the authority and
+// corrects any local edit within MAX_OFFLINE_DAYS via the heartbeat.
+// ════════════════════════════════════════════════════════════════
+int LicenseManager::readStoredTier() const {
+    QSettings s(QSettings::NativeFormat, QSettings::UserScope, REG_ORG, REG_APP);
+    return s.value("License/Tier", 1).toInt();
+}
+void LicenseManager::writeStoredTier(int t) const {
+    QSettings s(QSettings::NativeFormat, QSettings::UserScope, REG_ORG, REG_APP);
+    s.setValue("License/Tier", t);
+}
+QStringList LicenseManager::readStoredFeatures() const {
+    QSettings s(QSettings::NativeFormat, QSettings::UserScope, REG_ORG, REG_APP);
+    return s.value("License/Features", QStringList{}).toStringList();
+}
+void LicenseManager::writeStoredFeatures(const QStringList &f) const {
+    QSettings s(QSettings::NativeFormat, QSettings::UserScope, REG_ORG, REG_APP);
+    s.setValue("License/Features", f);
+}
+
+// Build the canonical feature list for a given tier (used when the server
+// doesn't return an explicit feature array — e.g. legacy keys or local-only).
+static QStringList featuresForTier(int tier) {
+    QStringList f;
+    if (tier >= 2) {
+        f << Feature::USER_MANAGEMENT << Feature::ADVANCED_REPORTS
+          << Feature::SCHEDULES << Feature::BARCODE << Feature::MESSAGING;
+    }
+    if (tier >= 3) {
+        f << Feature::PURCHASING << Feature::EXPENSES << Feature::CUSTOMERS
+          << Feature::PL_REPORT << Feature::STOCK_VALUATION;
+    }
+    if (tier >= 4) {
+        f << Feature::MULTI_BRANCH << Feature::PAYROLL << Feature::VAT_MODULE;
+    }
+    return f;
+}
+
+void LicenseManager::applyServerTier(int t, const QStringList &feats) {
+    m_tier     = t;
+    m_features = feats.isEmpty() ? featuresForTier(t) : feats;
+    writeStoredTier(t);
+    writeStoredFeatures(m_features);
 }
 
 // ════════════════════════════════════════════════════════════════
@@ -286,6 +334,13 @@ void LicenseManager::startOnlineHeartbeat() {
             writeRevoked(false);
             m_offlineDaysRemaining = MAX_OFFLINE_DAYS;
             m_offlineGraceExpired  = false;
+
+            // Refresh tier/features — server may have changed the entitlement
+            const int serverTier = json["tier"].toInt(m_tier);
+            QStringList serverFeatures;
+            for (const QJsonValue &v : json["features"].toArray())
+                serverFeatures << v.toString();
+            applyServerTier(serverTier, serverFeatures);
         } else {
             // Enforced at next launch by initialize()
             writeRevoked(true);
@@ -342,6 +397,15 @@ LicenseManager::ActivationResult LicenseManager::activateOnServer(
         writeLastOnlineCheck();
         m_state    = LicenseState::FullLicense;
         m_daysLeft = -1;
+
+        // Parse tier and optional per-feature list from server response.
+        // Server should return: { "valid": true, "tier": 3, "features": [...] }
+        const int serverTier = json["tier"].toInt(1);
+        QStringList serverFeatures;
+        for (const QJsonValue &v : json["features"].toArray())
+            serverFeatures << v.toString();
+        applyServerTier(serverTier, serverFeatures);
+
         return ActivationResult::Success;
     }
 
@@ -419,15 +483,24 @@ void LicenseManager::initialize() {
 
         m_state    = LicenseState::FullLicense;
         m_daysLeft = -1;
+        // Restore the tier/features that were written at activation/heartbeat.
+        m_tier     = readStoredTier();
+        m_features = readStoredFeatures();
+        if (m_features.isEmpty())
+            m_features = featuresForTier(m_tier);
         return;
     }
 
-    // No key → trial
+    // No key → trial: grant everything so the customer can evaluate all tiers.
     int elapsed = installDate.daysTo(QDateTime::currentDateTime());
     m_daysLeft  = TRIAL_DAYS - elapsed;
     m_state     = (m_daysLeft > 0)
                   ? LicenseState::Trial
                   : LicenseState::TrialExpired;
+    if (m_state == LicenseState::Trial) {
+        m_tier     = 4;
+        m_features = featuresForTier(4);
+    }
 }
 
 // ════════════════════════════════════════════════════════════════
@@ -460,4 +533,13 @@ QString LicenseManager::maskedKey() const {
     QString k = readStoredKey();
     if (k.length() < 4) return "Not activated";
     return "****-****-****-" + k.right(4);
+}
+
+int         LicenseManager::tier()                             const { return m_tier; }
+QStringList LicenseManager::features()                         const { return m_features; }
+bool        LicenseManager::hasTier(int minTier)               const { return m_tier >= minTier; }
+bool        LicenseManager::hasFeature(const QString &feature) const {
+    // Trial grants everything; activated copies use the server-supplied list.
+    if (m_state == LicenseState::Trial) return true;
+    return m_features.contains(feature);
 }
