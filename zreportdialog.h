@@ -29,11 +29,12 @@ class QTextEdit;
 class QPushButton;
 class QComboBox;
 class QDateEdit;
+class QDoubleSpinBox;
 
 struct ZReportData {
-    // Period
-    QDate reportDate;
+    QDate   reportDate;
     QString shiftInfo;
+    QString cashierName;
 
     // Sales summary
     double grossSales       = 0.0;
@@ -42,28 +43,28 @@ struct ZReportData {
     double taxCollected     = 0.0;
     int    transactionCount = 0;
 
+    // Refunds
+    int    refundCount  = 0;
+    double totalRefunds = 0.0;
+
+    // By payment method
+    struct PaymentLine { QString method; int count; double total; };
+    QVector<PaymentLine> byPayment;
+    double cashSales = 0.0;   // subset of netSales paid in cash
+
     // By category
-    struct CategoryLine {
-        QString category;
-        int     qty;
-        double  sales;
-    };
+    struct CategoryLine { QString category; int qty; double sales; };
     QVector<CategoryLine> byCategory;
 
     // Top products
-    struct ProductLine {
-        QString name;
-        int     qty;
-        double  sales;
-    };
+    struct ProductLine { QString name; int qty; double sales; };
     QVector<ProductLine> topProducts;
 
-    // Shift info
+    // Till reconciliation
     double openingFloat = 0.0;
-    double closingFloat = 0.0;
-    double expectedCash = 0.0;   // openingFloat + netSales - taxCollected (approx)
+    double closingFloat = 0.0;   // what the cashier counted in the drawer
+    double expectedCash = 0.0;   // openingFloat + cashSales - cashRefunds
     double cashVariance = 0.0;   // closingFloat - expectedCash
-    QString cashierName;
 };
 
 class ZReportDialog : public QDialog
@@ -85,6 +86,7 @@ private slots:
     void generateReport();
     void exportReport();
     void printReport();
+    void signOff();
 
 private:
     void setupUi();
@@ -95,11 +97,13 @@ private:
     SettingsManager *m_settings;
     ShiftManager    *m_shifts;
 
-    QComboBox  *m_shiftCombo   = nullptr;
-    QDateEdit  *m_dateEdit     = nullptr;
-    QTextEdit  *m_reportView   = nullptr;
-    QPushButton *m_exportBtn   = nullptr;
-    QPushButton *m_printBtn    = nullptr;
+    QComboBox      *m_shiftCombo       = nullptr;
+    QDateEdit      *m_dateEdit         = nullptr;
+    QTextEdit      *m_reportView       = nullptr;
+    QPushButton    *m_exportBtn        = nullptr;
+    QPushButton    *m_printBtn         = nullptr;
+    QDoubleSpinBox *m_openingFloatSpin = nullptr;
+    QDoubleSpinBox *m_countedCashSpin  = nullptr;
 
     ZReportData m_lastReport;
 };

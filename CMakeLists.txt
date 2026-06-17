@@ -89,6 +89,9 @@ set(PROJECT_SOURCES
     lowstockdialog.cpp lowstockdialog.h
     supplierdialog.cpp supplierdialog.h
     purchaseorderdialog.cpp purchaseorderdialog.h
+    refunddialog.cpp refunddialog.h
+    stocktakedialog.cpp stocktakedialog.h
+    onboardingwizard.cpp onboardingwizard.h
     expensedialog.cpp expensedialog.h
     customerdialog.cpp customerdialog.h
     MessageSchedule.h

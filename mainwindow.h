@@ -241,6 +241,8 @@ private slots:
     void onViewSalesHistory();
     void onReprintReceipt();
     void onEmailReceipt();
+    void onProcessRefund();
+    void onStockTake();
     void onShowAnalytics();
     void onDailyReport();
     void onShowReports();

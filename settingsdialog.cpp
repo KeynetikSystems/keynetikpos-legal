@@ -75,7 +75,8 @@ void SettingsDialog::setupUi()
     tabs->addTab(buildBusinessTab(),  "Business");
     tabs->addTab(buildTaxTab(),       "Tax");
     tabs->addTab(buildReceiptTab(),   "Receipt");
-    tabs->addTab(buildMessagingTab(), "Messaging");  // ← NEW TAB
+    tabs->addTab(buildMessagingTab(), "Messaging");
+    tabs->addTab(buildLoyaltyTab(),   "Loyalty");
     tabs->addTab(buildSecurityTab(),  "Security");
 
     mainLayout->addWidget(tabs, 1);
@@ -400,6 +401,48 @@ QWidget *SettingsDialog::buildMessagingTab()
     return w;
 }
 
+QWidget *SettingsDialog::buildLoyaltyTab()
+{
+    auto *w      = new QWidget(this);
+    auto *layout = new QVBoxLayout(w);
+    layout->setSpacing(12);
+
+    auto *earnGroup = new QGroupBox("Points Earning");
+    earnGroup->setStyleSheet(sectionStyle());
+    auto *earnForm = new QFormLayout(earnGroup);
+    earnForm->setLabelAlignment(Qt::AlignRight | Qt::AlignVCenter);
+
+    m_loyaltySpend = new QSpinBox(earnGroup);
+    m_loyaltySpend->setRange(10, 100000);
+    m_loyaltySpend->setSingleStep(10);
+    m_loyaltySpend->setSuffix(" KSh");
+    m_loyaltySpend->setFixedWidth(130);
+    earnForm->addRow("Spend per point:", m_loyaltySpend);
+    earnForm->addRow("", new QLabel(
+        "<i style='color:#555;'>Customer earns 1 point for every N KSh spent.</i>"));
+
+    layout->addWidget(earnGroup);
+
+    auto *redeemGroup = new QGroupBox("Points Redemption");
+    redeemGroup->setStyleSheet(sectionStyle());
+    auto *redeemForm = new QFormLayout(redeemGroup);
+    redeemForm->setLabelAlignment(Qt::AlignRight | Qt::AlignVCenter);
+
+    m_loyaltyRedeem = new QSpinBox(redeemGroup);
+    m_loyaltyRedeem->setRange(1, 10000);
+    m_loyaltyRedeem->setSingleStep(1);
+    m_loyaltyRedeem->setSuffix(" cents");
+    m_loyaltyRedeem->setFixedWidth(130);
+    redeemForm->addRow("Value per point:", m_loyaltyRedeem);
+    redeemForm->addRow("", new QLabel(
+        "<i style='color:#555;'>Each redeemed point is worth N cents of store credit.<br>"
+        "E.g. 10 cents/pt means 100 pts = KSh 10.</i>"));
+
+    layout->addWidget(redeemGroup);
+    layout->addStretch();
+    return w;
+}
+
 QWidget *SettingsDialog::buildSecurityTab()
 {
     auto *w      = new QWidget(this);
@@ -481,6 +524,9 @@ void SettingsDialog::loadCurrentValues()
     m_smtpFrom->setText(s.smtpFromEmail);
 
     m_requirePin->setChecked(s.requirePinForDiscount);
+
+    m_loyaltySpend->setValue(s.loyaltySpendPerPoint / 100);   // cents → KSh
+    m_loyaltyRedeem->setValue(s.loyaltyCentsPerPoint);
 
     // Load WhatsApp settings
     QSettings settings("KeynetikPOS", "KeynetikPOS");
@@ -609,6 +655,9 @@ void SettingsDialog::save()
     s.smtpFromEmail  = m_smtpFrom->text().trimmed();
 
     s.requirePinForDiscount = m_requirePin->isChecked();
+
+    s.loyaltySpendPerPoint  = m_loyaltySpend->value() * 100;   // KSh → cents
+    s.loyaltyCentsPerPoint  = m_loyaltyRedeem->value();
 
     m_settings->setSettings(s);
     if (!newPin.isEmpty()) {

@@ -300,6 +300,14 @@ public:
     QString getLastError() const;
     bool executeQuery(const QString &queryStr);
 
+    // Integrity checks
+    // Runs PRAGMA integrity_check on the live DB. Returns true + empty string
+    // on success, or false + description of the first error found.
+    bool verifyDatabaseIntegrity(QString *errorOut = nullptr);
+    // Opens the backup file on a separate connection and runs the same check.
+    // Call after backupTo() to confirm the copy is readable.
+    bool verifyBackup(const QString &backupPath, QString *errorOut = nullptr);
+
     // Profit calculation
     Money getActualGrossProfit(const QString &startDate, const QString &endDate);
     Money getActualGrossProfitToday();

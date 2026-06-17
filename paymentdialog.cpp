@@ -124,13 +124,13 @@ void PaymentDialog::setupUI()
     loyaltyLabel->hide();
     amountLayout->addWidget(loyaltyLabel);
 
-    redeemPointsButton = new QPushButton("Redeem Points (100 pts = KSh 10)");
+    redeemPointsButton = new QPushButton("Redeem Loyalty Points");
     redeemPointsButton->setProperty("kind", "info");
     redeemPointsButton->hide();
     connect(redeemPointsButton, &QPushButton::clicked, this, [this]() {
         // Redeem ALL available points; cap at outstanding total
         const int availPts      = m_customer.loyaltyPoints;
-        const Money creditPerPt = Money::fromCents(10); // 100 pts = KSh10 = 1000c → 10c/pt
+        const Money creditPerPt = Money::fromCents(m_loyaltyCentsPerPt);
         const Money maxCredit   = creditPerPt * availPts;
         const Money outstanding = Money::fromMajor(std::max(0.0, total));
         const Money applied     = maxCredit.cents() >= outstanding.cents()
@@ -309,7 +309,8 @@ void PaymentDialog::setCustomer(const Customer &customer)
             QString("Customer: %1  |  Loyalty Points: %2 (worth %3)")
                 .arg(customer.name)
                 .arg(customer.loyaltyPoints)
-                .arg(formatMoney(Money::fromCents(customer.loyaltyPoints * 10LL))));
+                .arg(formatMoney(Money::fromCents(
+                    static_cast<qint64>(customer.loyaltyPoints) * m_loyaltyCentsPerPt))));
         loyaltyLabel->show();
         redeemPointsButton->show();
         redeemPointsButton->setEnabled(true);
@@ -323,6 +324,12 @@ void PaymentDialog::setCustomer(const Customer &customer)
         applyCreditButton->show();
         applyCreditButton->setEnabled(true);
     }
+}
+
+void PaymentDialog::setLoyaltyCentsPerPoint(int centsPerPoint)
+{
+    if (centsPerPoint > 0)
+        m_loyaltyCentsPerPt = centsPerPoint;
 }
 
 QString PaymentDialog::getPaymentMethod()   const { return paymentMethod; }

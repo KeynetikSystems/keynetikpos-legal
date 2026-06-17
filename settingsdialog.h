@@ -93,4 +93,9 @@ private:
     QLineEdit   *m_discountPin   = nullptr;
     QLineEdit   *m_discountPin2  = nullptr;
     QCheckBox   *m_requirePin    = nullptr;
+
+    // Loyalty tab
+    QSpinBox    *m_loyaltySpend  = nullptr;   // KSh per point (spend threshold)
+    QSpinBox    *m_loyaltyRedeem = nullptr;   // cents per point when redeeming
+    QWidget *buildLoyaltyTab();
 };

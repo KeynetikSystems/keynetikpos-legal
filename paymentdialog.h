@@ -39,6 +39,9 @@ public:
     // Optionally attach a customer before exec() — shows their store credit
     // balance and lets the cashier apply it against the total.
     void setCustomer(const Customer &customer);
+    // Pass the configurable redemption rate (cents per point) before exec().
+    // Defaults to 10 (= KSh 0.10 per point).
+    void setLoyaltyCentsPerPoint(int centsPerPoint);
 
     QString getPaymentMethod() const;
     Money getAmountPaid() const;
@@ -89,9 +92,10 @@ private:
 
     // Customer state
     Customer  m_customer;
-    bool      m_hasCustomer    { false };
+    bool      m_hasCustomer        { false };
     Money     m_storeCreditUsed;
-    int       m_pointsRedeemed { 0 };   // points burned this checkout
+    int       m_pointsRedeemed     { 0 };   // points burned this checkout
+    int       m_loyaltyCentsPerPt  { 10 };  // configurable redemption rate
 };
 
 #endif // PAYMENTDIALOG_H

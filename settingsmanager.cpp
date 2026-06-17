@@ -78,6 +78,10 @@ void SettingsManager::load()
     m_settings.printReceipt         = getSetting("printReceipt",  "1") == "1";
     m_settings.discountPin          = getSetting("discountPin",   m_settings.discountPin);
     m_settings.requirePinForDiscount= getSetting("requirePinForDiscount", "1") == "1";
+    m_settings.loyaltySpendPerPoint = getSetting("loyaltySpendPerPoint",
+                                          QString::number(m_settings.loyaltySpendPerPoint)).toInt();
+    m_settings.loyaltyCentsPerPoint = getSetting("loyaltyCentsPerPoint",
+                                          QString::number(m_settings.loyaltyCentsPerPoint)).toInt();
 
     m_settings.smtpHost             = getSetting("smtpHost",      m_settings.smtpHost);
     m_settings.smtpPort             = getSetting("smtpPort",      QString::number(m_settings.smtpPort)).toInt();
@@ -129,6 +133,8 @@ void SettingsManager::save()
     setSetting("printReceipt",          m_settings.printReceipt ? "1" : "0");
     setSetting("discountPin",           m_settings.discountPin);
     setSetting("requirePinForDiscount", m_settings.requirePinForDiscount ? "1" : "0");
+    setSetting("loyaltySpendPerPoint",  QString::number(m_settings.loyaltySpendPerPoint));
+    setSetting("loyaltyCentsPerPoint",  QString::number(m_settings.loyaltyCentsPerPoint));
 
     setSetting("smtpHost",              m_settings.smtpHost);
     setSetting("smtpPort",              QString::number(m_settings.smtpPort));

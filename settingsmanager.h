@@ -50,6 +50,12 @@ struct BusinessSettings {
     QString discountPin      = "1234";
     bool    requirePinForDiscount = true;
 
+    // Loyalty programme
+    // Points earned: 1 point per loyaltySpendPerPoint cents spent (default 10000 = KSh 100)
+    // Points redeemed: each point is worth loyaltyCentsPerPoint cents (default 10 = KSh 0.10)
+    int loyaltySpendPerPoint  = 10000;   // cents; 10000 = KSh 100 per point
+    int loyaltyCentsPerPoint  = 10;      // cents per point when redeeming
+
     // SMTP (email receipts). smtpSecurity: 0 = None, 1 = STARTTLS, 2 = SSL/TLS.
     // smtpFromEmail defaults to the business `email` if left blank.
     QString smtpHost         = "";

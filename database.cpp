@@ -372,6 +372,22 @@ bool Database::createTables()
         )
     )";
     queries << "CREATE INDEX IF NOT EXISTS idx_customers_phone ON customers(phone)";
+    // Till reconciliation sign-off records
+    queries << R"(
+        CREATE TABLE IF NOT EXISTS till_reconciliations (
+            id                  INTEGER PRIMARY KEY AUTOINCREMENT,
+            reconciliation_date TEXT NOT NULL,
+            cashier_name        TEXT,
+            opening_float       INTEGER NOT NULL DEFAULT 0,
+            cash_sales          INTEGER NOT NULL DEFAULT 0,
+            expected_cash       INTEGER NOT NULL DEFAULT 0,
+            counted_cash        INTEGER NOT NULL DEFAULT 0,
+            variance            INTEGER NOT NULL DEFAULT 0,
+            signed_off_by       TEXT,
+            signed_off_at       TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    )";
+    queries << "CREATE INDEX IF NOT EXISTS idx_till_date ON till_reconciliations(reconciliation_date)";
 
     // Execute all queries
     for (const QString &queryStr : queries) {
@@ -1912,6 +1928,14 @@ bool Database::backupTo(const QString &destDir, QString *outPath)
 
     if (outPath)
         *outPath = destPath;
+
+    // Verify the copy is readable and not corrupted before reporting success.
+    QString verifyErr;
+    if (!verifyBackup(destPath, &verifyErr)) {
+        QFile::remove(destPath);   // discard the bad copy
+        lastError = "Backup copy failed integrity check: " + verifyErr;
+        return false;
+    }
     return true;
 }
 
@@ -1954,6 +1978,57 @@ bool Database::executeQuery(const QString &queryStr)
 {
     QSqlQuery q(db);
     return q.exec(queryStr);
+}
+
+bool Database::verifyDatabaseIntegrity(QString *errorOut)
+{
+    QSqlQuery q(db);
+    if (!q.exec("PRAGMA integrity_check")) {
+        if (errorOut) *errorOut = q.lastError().text();
+        return false;
+    }
+    if (q.next()) {
+        const QString result = q.value(0).toString();
+        if (result != "ok") {
+            if (errorOut) *errorOut = result;
+            return false;
+        }
+    }
+    return true;
+}
+
+bool Database::verifyBackup(const QString &backupPath, QString *errorOut)
+{
+    const QString connName = "backup_verify_" +
+                             QString::number(QDateTime::currentMSecsSinceEpoch());
+    {
+        QSqlDatabase bdb = QSqlDatabase::addDatabase("QSQLITE", connName);
+        bdb.setDatabaseName(backupPath);
+        if (!bdb.open()) {
+            if (errorOut) *errorOut = "Cannot open backup file: " + bdb.lastError().text();
+            QSqlDatabase::removeDatabase(connName);
+            return false;
+        }
+        QSqlQuery q(bdb);
+        if (!q.exec("PRAGMA integrity_check") || !q.next()) {
+            if (errorOut) *errorOut = "integrity_check failed: " + q.lastError().text();
+            bdb.close();
+            QSqlDatabase::removeDatabase(connName);
+            return false;
+        }
+        const QString result = q.value(0).toString();
+        if (result != "ok") {
+            if (errorOut) *errorOut = "Backup corrupted: " + result;
+            bdb.close();
+            QSqlDatabase::removeDatabase(connName);
+            return false;
+        }
+        // Spot-check that core tables have rows
+        q.exec("SELECT COUNT(*) FROM sales");
+        bdb.close();
+    }
+    QSqlDatabase::removeDatabase(connName);
+    return true;
 }
 
 // ==================== Profit calculation methods ====================

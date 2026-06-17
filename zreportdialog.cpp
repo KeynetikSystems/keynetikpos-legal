@@ -32,6 +32,7 @@
 #include <QPrintDialog>
 #include <QTextDocument>
 #include <QDateTime>
+#include <QDoubleSpinBox>
 
 ZReportDialog::ZReportDialog(QSqlDatabase &db,
                              SettingsManager *settings,
@@ -65,14 +66,13 @@ void ZReportDialog::setupUi()
     controlLayout->addWidget(new QLabel("Shift:"));
     m_shiftCombo = new QComboBox(this);
     m_shiftCombo->addItem("All Shifts Today", -1);
-    // Populate with today's closed shifts
     for (const ShiftRecord &s : m_shifts->getShiftHistory(1)) {
-        QString label = QString("Shift #%1 — %2 (%3)")
-                            .arg(s.shiftId)
-                            .arg(s.cashierName)
-                            .arg(s.openedAt.toString("HH:mm"));
-        m_shiftCombo->addItem(label, s.shiftId);
-    };
+        m_shiftCombo->addItem(
+            QString("Shift #%1 — %2 (%3)")
+                .arg(s.shiftId).arg(s.cashierName)
+                .arg(s.openedAt.toString("HH:mm")),
+            s.shiftId);
+    }
     controlLayout->addWidget(m_shiftCombo);
     controlLayout->addStretch();
 
@@ -82,6 +82,38 @@ void ZReportDialog::setupUi()
     controlLayout->addWidget(genBtn);
 
     mainLayout->addWidget(controlGroup);
+
+    // ── Cash-Up / Till Reconciliation ────────────────────
+    const QString sym = m_settings->currencySymbol();
+    auto *cashGroup   = new QGroupBox("Till Reconciliation (Cash-Up)");
+    auto *cashLayout  = new QHBoxLayout(cashGroup);
+
+    cashLayout->addWidget(new QLabel("Opening Float:"));
+    m_openingFloatSpin = new QDoubleSpinBox(this);
+    m_openingFloatSpin->setRange(0, 9999999);
+    m_openingFloatSpin->setDecimals(2);
+    m_openingFloatSpin->setPrefix(sym + " ");
+    // Pre-fill from current open shift if one exists
+    if (m_shifts->isShiftOpen())
+        m_openingFloatSpin->setValue(m_shifts->currentShift().openingFloat);
+    cashLayout->addWidget(m_openingFloatSpin);
+
+    cashLayout->addSpacing(20);
+    cashLayout->addWidget(new QLabel("Counted Cash in Drawer:"));
+    m_countedCashSpin = new QDoubleSpinBox(this);
+    m_countedCashSpin->setRange(0, 9999999);
+    m_countedCashSpin->setDecimals(2);
+    m_countedCashSpin->setPrefix(sym + " ");
+    cashLayout->addWidget(m_countedCashSpin);
+
+    cashLayout->addSpacing(20);
+    auto *signOffBtn = new QPushButton("Sign Off & Record", this);
+    signOffBtn->setProperty("kind", "primary");
+    connect(signOffBtn, &QPushButton::clicked, this, &ZReportDialog::signOff);
+    cashLayout->addWidget(signOffBtn);
+
+    cashLayout->addStretch();
+    mainLayout->addWidget(cashGroup);
 
     // ── Report View ───────────────────────────────────────
     m_reportView = new QTextEdit(this);
@@ -124,108 +156,116 @@ ZReportData ZReportDialog::buildReport(const QDate &date, int shiftId)
     ZReportData data;
     data.reportDate = date;
 
-    QString dayStart = date.toString("yyyy-MM-dd") + " 00:00:00";
-    QString dayEnd   = date.toString("yyyy-MM-dd") + " 23:59:59";
+    const QString day = date.toString("yyyy-MM-dd");
 
-    // ── Basic sales from Sales table for the day ──────────
     QSqlQuery q(m_db);
 
-    // Total gross sales (sum price * qty from Sales joined to Products)
-    QString baseWhere = (shiftId > 0)
-                            ? QString("WHERE s.SaleDatetime BETWEEN '%1' AND '%2'").arg(dayStart, dayEnd)
-                            : QString("WHERE s.SaleDatetime BETWEEN '%1' AND '%2'").arg(dayStart, dayEnd);
-
-    q.exec(QString(R"(
-        SELECT
-            COUNT(DISTINCT s.SaleID) AS txCount,
-            SUM(p.RegularPrice * s.Quantity) AS gross
-        FROM Sales s
-        JOIN Products p ON p.ProductID = s.ProductID
-        %1
-    )").arg(baseWhere));
-
-    if (q.next()) {
+    // ── Sales summary ────────────────────────────────────
+    q.prepare("SELECT COUNT(*), "
+              "       COALESCE(SUM(total),    0), "
+              "       COALESCE(SUM(discount), 0), "
+              "       COALESCE(SUM(tax),      0) "
+              "FROM sales "
+              "WHERE substr(sale_date, 1, 10) = ?");
+    q.addBindValue(day);
+    if (q.exec() && q.next()) {
         data.transactionCount = q.value(0).toInt();
-        data.grossSales       = q.value(1).toDouble();
+        const double gross    = q.value(1).toLongLong() / 100.0;
+        data.totalDiscounts   = q.value(2).toLongLong() / 100.0;
+        data.taxCollected     = q.value(3).toLongLong() / 100.0;
+        data.grossSales       = gross + data.totalDiscounts; // pre-discount
+        data.netSales         = gross;
     }
 
-    // ── Discounts for the day ────────────────────────────
-    q.exec(QString(R"(
-        SELECT COALESCE(SUM(DiscountAmount), 0)
-        FROM DiscountLog
-        WHERE AppliedAt BETWEEN '%1' AND '%2'
-    )").arg(dayStart, dayEnd));
-    if (q.next()) data.totalDiscounts = q.value(0).toDouble();
+    // ── Refund summary ───────────────────────────────────
+    q.prepare("SELECT COUNT(*), COALESCE(SUM(total_refunded), 0) "
+              "FROM refunds "
+              "WHERE substr(refund_date, 1, 10) = ?");
+    q.addBindValue(day);
+    if (q.exec() && q.next()) {
+        data.refundCount  = q.value(0).toInt();
+        data.totalRefunds = q.value(1).toLongLong() / 100.0;
+    }
 
-    data.netSales = data.grossSales - data.totalDiscounts;
-
-    // Tax
-    if (m_settings->taxEnabled()) {
-        if (m_settings->taxInclusive()) {
-            data.taxCollected = m_settings->extractTax(data.netSales);
-        } else {
-            data.taxCollected = m_settings->taxAmount(data.netSales);
+    // ── Sales by payment method ──────────────────────────
+    q.prepare("SELECT payment_method, COUNT(*), COALESCE(SUM(total), 0) "
+              "FROM sales "
+              "WHERE substr(sale_date, 1, 10) = ? "
+              "GROUP BY payment_method ORDER BY 3 DESC");
+    q.addBindValue(day);
+    if (q.exec()) {
+        while (q.next()) {
+            ZReportData::PaymentLine pl;
+            pl.method = q.value(0).toString();
+            pl.count  = q.value(1).toInt();
+            pl.total  = q.value(2).toLongLong() / 100.0;
+            data.byPayment.append(pl);
+            if (pl.method == "Cash") data.cashSales = pl.total;
         }
     }
 
     // ── Sales by category ────────────────────────────────
-    q.exec(QString(R"(
-        SELECT p.Category,
-               SUM(s.Quantity) AS qty,
-               SUM(p.RegularPrice * s.Quantity) AS sales
-        FROM Sales s
-        JOIN Products p ON p.ProductID = s.ProductID
-        %1
-        GROUP BY p.Category
-        ORDER BY sales DESC
-    )").arg(baseWhere));
-
-    while (q.next()) {
-        ZReportData::CategoryLine cl;
-        cl.category = q.value(0).toString();
-        cl.qty      = q.value(1).toInt();
-        cl.sales    = q.value(2).toDouble();
-        data.byCategory.append(cl);
+    q.prepare("SELECT p.category, "
+              "       COALESCE(SUM(si.quantity), 0), "
+              "       COALESCE(SUM(si.subtotal), 0) "
+              "FROM sales s "
+              "JOIN sale_items si ON si.sale_id = s.id "
+              "JOIN products   p  ON p.id = si.product_id "
+              "WHERE substr(s.sale_date, 1, 10) = ? "
+              "GROUP BY p.category ORDER BY 3 DESC");
+    q.addBindValue(day);
+    if (q.exec()) {
+        while (q.next()) {
+            ZReportData::CategoryLine cl;
+            cl.category = q.value(0).toString();
+            cl.qty      = q.value(1).toInt();
+            cl.sales    = q.value(2).toLongLong() / 100.0;
+            data.byCategory.append(cl);
+        }
     }
 
     // ── Top 10 products ───────────────────────────────────
-    q.exec(QString(R"(
-        SELECT p.ProductName,
-               SUM(s.Quantity) AS qty,
-               SUM(p.RegularPrice * s.Quantity) AS sales
-        FROM Sales s
-        JOIN Products p ON p.ProductID = s.ProductID
-        %1
-        GROUP BY p.ProductID
-        ORDER BY sales DESC
-        LIMIT 10
-    )").arg(baseWhere));
-
-    while (q.next()) {
-        ZReportData::ProductLine pl;
-        pl.name  = q.value(0).toString();
-        pl.qty   = q.value(1).toInt();
-        pl.sales = q.value(2).toDouble();
-        data.topProducts.append(pl);
+    q.prepare("SELECT si.product_name, "
+              "       COALESCE(SUM(si.quantity), 0), "
+              "       COALESCE(SUM(si.subtotal), 0) "
+              "FROM sales s "
+              "JOIN sale_items si ON si.sale_id = s.id "
+              "WHERE substr(s.sale_date, 1, 10) = ? "
+              "GROUP BY si.product_id "
+              "ORDER BY 3 DESC LIMIT 10");
+    q.addBindValue(day);
+    if (q.exec()) {
+        while (q.next()) {
+            ZReportData::ProductLine pl;
+            pl.name  = q.value(0).toString();
+            pl.qty   = q.value(1).toInt();
+            pl.sales = q.value(2).toLongLong() / 100.0;
+            data.topProducts.append(pl);
+        }
     }
 
-    // ── Shift info ────────────────────────────────────────
+    // ── Shift / float info ────────────────────────────────
     if (shiftId > 0) {
-        ShiftRecord sr = m_shifts->getShift(shiftId);
+        ShiftRecord sr    = m_shifts->getShift(shiftId);
         data.cashierName  = sr.cashierName;
         data.openingFloat = sr.openingFloat;
         data.closingFloat = sr.closingFloat;
         data.shiftInfo    = QString("Shift #%1 — %2").arg(sr.shiftId).arg(sr.cashierName);
-        data.expectedCash = data.openingFloat + data.netSales;
-        data.cashVariance = data.closingFloat - data.expectedCash;
     } else {
         data.shiftInfo = "All Shifts";
         if (m_shifts->isShiftOpen()) {
-            ShiftRecord sr = m_shifts->currentShift();
-            data.cashierName  = sr.cashierName;
-            data.openingFloat = sr.openingFloat;
+            data.cashierName  = m_shifts->currentShift().cashierName;
+            data.openingFloat = m_shifts->currentShift().openingFloat;
         }
     }
+    // Override with cash-up spinbox values if the user has entered them
+    if (m_openingFloatSpin && m_openingFloatSpin->value() > 0)
+        data.openingFloat = m_openingFloatSpin->value();
+    if (m_countedCashSpin)
+        data.closingFloat = m_countedCashSpin->value();
+
+    data.expectedCash = data.openingFloat + data.cashSales - data.totalRefunds;
+    data.cashVariance = data.closingFloat - data.expectedCash;
 
     return data;
 }
@@ -288,6 +328,11 @@ tr:nth-child(even) td { background:#f5f5f5; }
 
     html += kv("Net Sales", money(data.netSales));
 
+    if (data.refundCount > 0) {
+        html += kv(QString("Refunds (%1)").arg(data.refundCount),
+                   "-" + money(data.totalRefunds), "highlight");
+    }
+
     if (m_settings->taxEnabled() && data.taxCollected > 0) {
         html += kv(QString("%1 Collected (%2%)")
                        .arg(m_settings->taxLabel())
@@ -296,6 +341,17 @@ tr:nth-child(even) td { background:#f5f5f5; }
     }
 
     html += "</div>";
+
+    // ── Payment Method Breakdown ───────────────────────────
+    if (!data.byPayment.isEmpty()) {
+        html += "<h2>By Payment Method</h2>";
+        html += "<table><tr><th>Method</th><th>Transactions</th><th>Total</th></tr>";
+        for (const auto &pl : data.byPayment) {
+            html += QString("<tr><td>%1</td><td>%2</td><td>%3</td></tr>")
+                        .arg(pl.method).arg(pl.count).arg(money(pl.total));
+        }
+        html += "</table>";
+    }
 
     // ── Cash Reconciliation ────────────────────────────────
     if (data.openingFloat > 0 || data.closingFloat > 0) {
@@ -353,6 +409,54 @@ tr:nth-child(even) td { background:#f5f5f5; }
     return html;
 }
 
+void ZReportDialog::signOff()
+{
+    generateReport();   // refresh with current spinbox values
+    const ZReportData &d = m_lastReport;
+
+    const QString sym = m_settings->currencySymbol();
+    QString msg = QString(
+        "Till Sign-Off — %1\n\n"
+        "Opening Float:  %2 %3\n"
+        "Cash Sales:     %2 %4\n"
+        "Expected Cash:  %2 %5\n"
+        "Counted Cash:   %2 %6\n"
+        "Variance:       %2 %7\n\n"
+        "Record this reconciliation?")
+        .arg(d.reportDate.toString("yyyy-MM-dd"), sym)
+        .arg(d.openingFloat, 0, 'f', 2)
+        .arg(d.cashSales,    0, 'f', 2)
+        .arg(d.expectedCash, 0, 'f', 2)
+        .arg(d.closingFloat, 0, 'f', 2)
+        .arg(d.cashVariance, 0, 'f', 2);
+
+    if (QMessageBox::question(this, "Sign Off Till", msg,
+            QMessageBox::Yes | QMessageBox::No) != QMessageBox::Yes)
+        return;
+
+    // Persist to till_reconciliations table
+    QSqlQuery q(m_db);
+    q.prepare("INSERT INTO till_reconciliations "
+              "(reconciliation_date, cashier_name, opening_float, cash_sales, "
+              " expected_cash, counted_cash, variance, signed_off_by) "
+              "VALUES (?, ?, ?, ?, ?, ?, ?, ?)");
+    q.addBindValue(d.reportDate.toString("yyyy-MM-dd"));
+    q.addBindValue(d.cashierName.isEmpty()
+                       ? m_settings->businessName() : d.cashierName);
+    q.addBindValue(qRound64(d.openingFloat * 100));
+    q.addBindValue(qRound64(d.cashSales    * 100));
+    q.addBindValue(qRound64(d.expectedCash * 100));
+    q.addBindValue(qRound64(d.closingFloat * 100));
+    q.addBindValue(qRound64(d.cashVariance * 100));
+    q.addBindValue(d.cashierName);
+    if (!q.exec())
+        QMessageBox::warning(this, "Sign-Off Failed",
+                             "Could not save reconciliation: " + q.lastError().text());
+    else
+        QMessageBox::information(this, "Signed Off",
+                                 "Till reconciliation recorded successfully.");
+}
+
 void ZReportDialog::exportReport()
 {
     QString fileName = QFileDialog::getSaveFileName(
@@ -392,81 +496,88 @@ QString ZReportDialog::generateZReportText(QSqlDatabase &db,
                                            const QDate &date,
                                            int shiftId)
 {
-    // Build report data
     ZReportData data;
     data.reportDate = date;
-
-    QString dayStart = date.toString("yyyy-MM-dd") + " 00:00:00";
-    QString dayEnd   = date.toString("yyyy-MM-dd") + " 23:59:59";
-
-    QString baseWhere = (shiftId > 0)
-                            ? QString(" WHERE s.SaleDateTime BETWEEN '%1' AND '%2' AND s.ShiftID = %3 ")
-                                  .arg(dayStart, dayEnd).arg(shiftId)
-                            : QString(" WHERE s.SaleDateTime BETWEEN '%1' AND '%2' ")
-                                  .arg(dayStart, dayEnd);
+    const QString day = date.toString("yyyy-MM-dd");
 
     QSqlQuery q(db);
 
-    // Gross sales
-    q.exec(QString("SELECT COUNT(*), SUM(p.RegularPrice * s.Quantity) "
-                   "FROM Sales s JOIN Products p ON p.ProductID = s.ProductID %1")
-               .arg(baseWhere));
-    if (q.next()) {
+    q.prepare("SELECT COUNT(*), COALESCE(SUM(total),0), "
+              "COALESCE(SUM(discount),0), COALESCE(SUM(tax),0) "
+              "FROM sales WHERE substr(sale_date,1,10) = ?");
+    q.addBindValue(day);
+    if (q.exec() && q.next()) {
+        const double gross  = q.value(1).toLongLong() / 100.0;
+        data.totalDiscounts = q.value(2).toLongLong() / 100.0;
+        data.taxCollected   = q.value(3).toLongLong() / 100.0;
         data.transactionCount = q.value(0).toInt();
-        data.grossSales = q.value(1).toDouble();
+        data.grossSales     = gross + data.totalDiscounts;
+        data.netSales       = gross;
     }
 
-    // Discounts
-    q.exec(QString("SELECT SUM(DiscountAmount) FROM Sales s %1").arg(baseWhere));
-    if (q.next()) {
-        data.totalDiscounts = q.value(0).toDouble();
+    q.prepare("SELECT COUNT(*), COALESCE(SUM(total_refunded),0) "
+              "FROM refunds WHERE substr(refund_date,1,10) = ?");
+    q.addBindValue(day);
+    if (q.exec() && q.next()) {
+        data.refundCount  = q.value(0).toInt();
+        data.totalRefunds = q.value(1).toLongLong() / 100.0;
     }
 
-    data.netSales = data.grossSales - data.totalDiscounts;
-
-    // Tax
-    if (settings->taxEnabled()) {
-        data.taxCollected = data.netSales * settings->taxRate();
+    q.prepare("SELECT payment_method, COUNT(*), COALESCE(SUM(total),0) "
+              "FROM sales WHERE substr(sale_date,1,10) = ? "
+              "GROUP BY payment_method ORDER BY 3 DESC");
+    q.addBindValue(day);
+    if (q.exec()) {
+        while (q.next()) {
+            ZReportData::PaymentLine pl;
+            pl.method = q.value(0).toString();
+            pl.count  = q.value(1).toInt();
+            pl.total  = q.value(2).toLongLong() / 100.0;
+            data.byPayment.append(pl);
+            if (pl.method == "Cash") data.cashSales = pl.total;
+        }
     }
 
-    // Categories
-    q.exec(QString(R"(
-        SELECT p.Category, SUM(s.Quantity), SUM(p.RegularPrice * s.Quantity)
-        FROM Sales s JOIN Products p ON p.ProductID = s.ProductID
-        %1 GROUP BY p.Category ORDER BY 3 DESC
-    )").arg(baseWhere));
-
-    while (q.next()) {
-        ZReportData::CategoryLine cl;
-        cl.category = q.value(0).toString();
-        cl.qty = q.value(1).toInt();
-        cl.sales = q.value(2).toDouble();
-        data.byCategory.append(cl);
+    q.prepare("SELECT p.category, COALESCE(SUM(si.quantity),0), "
+              "COALESCE(SUM(si.subtotal),0) "
+              "FROM sales s JOIN sale_items si ON si.sale_id=s.id "
+              "JOIN products p ON p.id=si.product_id "
+              "WHERE substr(s.sale_date,1,10)=? "
+              "GROUP BY p.category ORDER BY 3 DESC");
+    q.addBindValue(day);
+    if (q.exec()) {
+        while (q.next()) {
+            ZReportData::CategoryLine cl;
+            cl.category = q.value(0).toString();
+            cl.qty      = q.value(1).toInt();
+            cl.sales    = q.value(2).toLongLong() / 100.0;
+            data.byCategory.append(cl);
+        }
     }
 
-    // Top products
-    q.exec(QString(R"(
-        SELECT p.ProductName, SUM(s.Quantity), SUM(p.RegularPrice * s.Quantity)
-        FROM Sales s JOIN Products p ON p.ProductID = s.ProductID
-        %1 GROUP BY p.ProductID ORDER BY 3 DESC LIMIT 10
-    )").arg(baseWhere));
-
-    while (q.next()) {
-        ZReportData::ProductLine pl;
-        pl.name = q.value(0).toString();
-        pl.qty = q.value(1).toInt();
-        pl.sales = q.value(2).toDouble();
-        data.topProducts.append(pl);
+    q.prepare("SELECT si.product_name, COALESCE(SUM(si.quantity),0), "
+              "COALESCE(SUM(si.subtotal),0) "
+              "FROM sales s JOIN sale_items si ON si.sale_id=s.id "
+              "WHERE substr(s.sale_date,1,10)=? "
+              "GROUP BY si.product_id ORDER BY 3 DESC LIMIT 10");
+    q.addBindValue(day);
+    if (q.exec()) {
+        while (q.next()) {
+            ZReportData::ProductLine pl;
+            pl.name  = q.value(0).toString();
+            pl.qty   = q.value(1).toInt();
+            pl.sales = q.value(2).toLongLong() / 100.0;
+            data.topProducts.append(pl);
+        }
     }
 
-    // Shift info
     if (shiftId > 0 && shifts) {
-        ShiftRecord sr = shifts->getShift(shiftId);
-        data.cashierName = sr.cashierName;
+        ShiftRecord sr    = shifts->getShift(shiftId);
+        data.cashierName  = sr.cashierName;
         data.openingFloat = sr.openingFloat;
         data.closingFloat = sr.closingFloat;
-        data.shiftInfo = QString("Shift #%1 — %2").arg(sr.shiftId).arg(sr.cashierName);
-        data.expectedCash = data.openingFloat + data.netSales;
+        data.shiftInfo    = QString("Shift #%1 — %2").arg(sr.shiftId).arg(sr.cashierName);
+        data.expectedCash = data.openingFloat + data.cashSales;
         data.cashVariance = data.closingFloat - data.expectedCash;
     } else {
         data.shiftInfo = "All Shifts";

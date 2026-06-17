@@ -35,6 +35,9 @@
 #include "purchaseorderdialog.h"
 #include "expensedialog.h"
 #include "customerdialog.h"
+#include "refunddialog.h"
+#include "stocktakedialog.h"
+#include "onboardingwizard.h"
 #include "saleshistorydialog.h"
 #include "CartItem.h"
 #include "scheduledialog.h"
@@ -285,6 +288,12 @@ void MainWindow::runDeferredStartup()
 
     scheduleManager->start();
 
+    // Onboarding wizard: show on first launch (business name is still the default).
+    if (settingsManager->settings().businessName == "My Business") {
+        OnboardingWizard wizard(settingsManager, this);
+        wizard.exec();
+    }
+
     // Inventory polling.
     inventoryManager->startAutoRefresh(POSConfig::INVENTORY_CHECK_MS);
 
@@ -511,6 +520,9 @@ void MainWindow::setupMenuBar()
             &QAction::triggered, this, &MainWindow::onReprintReceipt);
     connect(salesMenu->addAction("Email Last Receipt"),
             &QAction::triggered, this, &MainWindow::onEmailReceipt);
+    salesMenu->addSeparator();
+    connect(salesMenu->addAction("Process Refund..."),
+            &QAction::triggered, this, &MainWindow::onProcessRefund);
 
     // Inventory
     QMenu *inventoryMenu = mb->addMenu("&Inventory");
@@ -527,6 +539,9 @@ void MainWindow::setupMenuBar()
             &QAction::triggered, this, &MainWindow::onManageSuppliers);
     connect(inventoryMenu->addAction("Purchase Orders..."),
             &QAction::triggered, this, &MainWindow::onManagePurchaseOrders);
+    inventoryMenu->addSeparator();
+    connect(inventoryMenu->addAction("Stock Take..."),
+            &QAction::triggered, this, &MainWindow::onStockTake);
 
     // Reports
     QMenu *reportsMenu = mb->addMenu("&Reports");
@@ -1102,6 +1117,7 @@ void MainWindow::onCheckout()
                                            settingsManager->settings());
 
     PaymentDialog paymentDialog(t.total, this);
+    paymentDialog.setLoyaltyCentsPerPoint(settingsManager->settings().loyaltyCentsPerPoint);
     if (m_hasSelectedCustomer)
         paymentDialog.setCustomer(m_selectedCustomer);
     if (paymentDialog.exec() != QDialog::Accepted) return;
@@ -1152,7 +1168,8 @@ void MainWindow::onCheckout()
     // Burn loyalty points if the cashier redeemed them
     const int redeemedPts = paymentDialog.getLoyaltyPointsRedeemed();
     if (redeemedPts > 0) {
-        const Money creditValue = Money::fromCents(redeemedPts * 10LL);
+        const Money creditValue = Money::fromCents(
+            static_cast<qint64>(redeemedPts) * settingsManager->settings().loyaltyCentsPerPoint);
         Database::instance().redeemLoyaltyPoints(
             paymentDialog.getCustomerId(), redeemedPts, creditValue);
     }
@@ -1468,6 +1485,22 @@ void MainWindow::onManagePurchaseOrders()
     // Receiving a PO changes stock_quantity directly in the DB, so the grid
     // (which only learns about changes via updateStock()/checkout) needs an
     // explicit reload — same reasoning as onManageInventory()'s finished hook.
+    loadProducts();
+}
+
+void MainWindow::onProcessRefund()
+{
+    if (!checkPermission(this, Permission::ADJUST_STOCK, "process refunds")) return;
+    RefundDialog dlg(this);
+    dlg.exec();
+    loadProducts();   // stock may have changed
+}
+
+void MainWindow::onStockTake()
+{
+    if (!checkPermission(this, Permission::ADJUST_STOCK, "perform stock take")) return;
+    StockTakeDialog dlg(this);
+    dlg.exec();
     loadProducts();
 }
 
