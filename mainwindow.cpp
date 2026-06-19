@@ -1218,6 +1218,7 @@ void MainWindow::setupCartSelector()
     layout->setSpacing(8);
 
     cartTabWidget = new QTabWidget();
+    cartTabWidget->setObjectName("cartTabs");
     cartTabWidget->setTabsClosable(true);
     cartTabWidget->setMovable(true);
     cartTabWidget->setDocumentMode(true);

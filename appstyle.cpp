@@ -229,6 +229,15 @@ QString semanticPart()
         /* Product grid (MainWindow) — cards paint themselves in the delegate */
         QListView#productGrid { background-color: transparent; border: none; }
 
+        /* Cart selector tabs — compact, and leave room on the right for the
+           close button so it isn't crammed against the cart title. Scoped to
+           #cartTabs so the big Settings/Analytics tabs are unaffected. */
+        QTabWidget#cartTabs QTabBar::tab { min-width: 70px; padding: 6px 30px 6px 12px; }
+        QTabWidget#cartTabs QTabBar::close-button {
+            subcontrol-position: right; subcontrol-origin: padding; margin-right: 6px; }
+        QTabWidget#cartTabs QTabBar::close-button:hover {
+            background: %error%; border-radius: 3px; }
+
         /* ── Totals-panel label roles ─────────────────────────────────── */
         QLabel[role="amount"]         { font-size: 14pt; }
         QLabel[role="amountDiscount"] { font-size: 14pt; color: %warning%; }
