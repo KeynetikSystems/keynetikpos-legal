@@ -94,6 +94,10 @@ license-server/.wrangler/
 .dev.vars
 *.dev.vars
 
+# Secret bulk-upload files (Daraja/M-Pesa etc.) — never commit
+*secrets*.json
+mpesa-secrets.json
+
 # SQLite databases (the POS db lives in AppData, but stay safe)
 *.db
 *.sqlite
