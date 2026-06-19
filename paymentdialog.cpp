@@ -431,6 +431,32 @@ QString PaymentDialog::getReferenceNumber() const
     return parts.join("; ");
 }
 
+QVector<SalePayment> PaymentDialog::getTenders() const
+{
+    QVector<SalePayment> tenders;
+    const double due = dueMajor();
+
+    double others = 0.0;   // exact (non-cash) tenders
+    if (cardCheck->isChecked()  && cardAmount->value()  > kEps) others += cardAmount->value();
+    if (mpesaCheck->isChecked() && mpesaAmount->value() > kEps) others += mpesaAmount->value();
+
+    if (cardCheck->isChecked() && cardAmount->value() > kEps)
+        tenders.append({ QStringLiteral("Card"),
+                         Money::fromMajor(cardAmount->value()),
+                         cardRef->text().trimmed() });
+    if (mpesaCheck->isChecked() && mpesaAmount->value() > kEps)
+        tenders.append({ QStringLiteral("Mobile Money"),
+                         Money::fromMajor(mpesaAmount->value()),
+                         referenceEdit->text().trimmed() });
+    if (cashCheck->isChecked()) {
+        // Cash absorbs change, so its net contribution is the remainder.
+        const double cashNet = std::max(0.0, due - others);
+        if (cashNet > kEps)
+            tenders.append({ QStringLiteral("Cash"), Money::fromMajor(cashNet), QString() });
+    }
+    return tenders;
+}
+
 Money PaymentDialog::getStoreCreditUsed()       const { return m_storeCreditUsed; }
 int   PaymentDialog::getCustomerId()            const { return m_hasCustomer ? m_customer.id : 0; }
 int   PaymentDialog::getLoyaltyPointsRedeemed() const { return m_pointsRedeemed; }

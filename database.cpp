@@ -223,6 +223,18 @@ bool Database::createTables()
             FOREIGN KEY (product_id) REFERENCES products(id)
         )
     )";
+    // Per-tender breakdown of a (possibly split) sale, for accurate
+    // payment-method reporting. Written inside the recordSale() transaction.
+    queries << R"(
+        CREATE TABLE IF NOT EXISTS sale_payments (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            sale_id INTEGER NOT NULL,
+            method TEXT NOT NULL,
+            amount INTEGER NOT NULL,
+            reference TEXT,
+            FOREIGN KEY (sale_id) REFERENCES sales(id)
+        )
+    )";
     // Users table for RBAC
     queries << R"(
         CREATE TABLE IF NOT EXISTS users (
@@ -811,7 +823,8 @@ int Database::recordSale(const QVector<SaleItem> &items,
                          Money subtotal, Money tax, Money discount, Money total,
                          const QString &paymentMethod,
                          Money amountPaid, Money changeDue,
-                         int customerId, Money storeCreditUsed)
+                         int customerId, Money storeCreditUsed,
+                         const QVector<SalePayment> &payments)
 {
     if (items.isEmpty()) {
         lastError = "Cannot record a sale with no items";
@@ -930,12 +943,65 @@ int Database::recordSale(const QVector<SaleItem> &items,
         }
     }
 
+    // Per-tender breakdown (split payments). Only amounts > 0 are recorded.
+    for (const SalePayment &p : payments) {
+        if (p.amount.cents() <= 0) continue;
+        QSqlQuery payQuery(db);
+        payQuery.prepare("INSERT INTO sale_payments (sale_id, method, amount, reference) "
+                         "VALUES (?, ?, ?, ?)");
+        payQuery.addBindValue(saleId);
+        payQuery.addBindValue(p.method);
+        payQuery.addBindValue(p.amount.cents());
+        payQuery.addBindValue(p.reference.isEmpty() ? QVariant(QMetaType(QMetaType::QString))
+                                                    : QVariant(p.reference));
+        if (!payQuery.exec()) {
+            lastError = payQuery.lastError().text();
+            db.rollback();
+            return -1;
+        }
+    }
+
     if (!db.commit()) {
         lastError = "Failed to commit sale: " + db.lastError().text();
         db.rollback();
         return -1;
     }
     return saleId;
+}
+
+QVector<PaymentTotal> Database::getPaymentTotalsByMethod(const QString &startDate,
+                                                         const QString &endDate)
+{
+    QVector<PaymentTotal> totals;
+    QSqlQuery query(db);
+    // Prefer the per-tender rows; for sales recorded before sale_payments
+    // existed (no rows), fall back to the sale's own payment_method/total so no
+    // history is lost.
+    query.prepare(
+        "SELECT method, SUM(amount) AS total, COUNT(*) AS cnt FROM ("
+        "  SELECT sp.method AS method, sp.amount AS amount "
+        "    FROM sale_payments sp JOIN sales s ON sp.sale_id = s.id "
+        "    WHERE DATE(s.sale_date) BETWEEN ? AND ? "
+        "  UNION ALL "
+        "  SELECT s.payment_method AS method, s.total AS amount "
+        "    FROM sales s "
+        "    WHERE DATE(s.sale_date) BETWEEN ? AND ? "
+        "      AND NOT EXISTS (SELECT 1 FROM sale_payments sp2 WHERE sp2.sale_id = s.id)"
+        ") GROUP BY method ORDER BY total DESC");
+    query.addBindValue(startDate);
+    query.addBindValue(endDate);
+    query.addBindValue(startDate);
+    query.addBindValue(endDate);
+    if (query.exec()) {
+        while (query.next()) {
+            PaymentTotal t;
+            t.method = query.value(0).toString();
+            t.total  = Money::fromCents(query.value(1).toLongLong());
+            t.count  = query.value(2).toInt();
+            totals.append(t);
+        }
+    }
+    return totals;
 }
 
 QVector<Sale> Database::getAllSales()

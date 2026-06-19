@@ -54,6 +54,9 @@ public:
     Money   getStoreCreditUsed() const;
     int     getCustomerId() const;
     int     getLoyaltyPointsRedeemed() const;
+    // Per-tender breakdown (net contributions summing to the amount due) for
+    // the sale_payments table. Cash absorbs any change; card/M-Pesa are exact.
+    QVector<SalePayment> getTenders() const;
 
 private slots:
     void recompute();             // re-sum tenders, refresh summary + Confirm state

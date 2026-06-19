@@ -78,6 +78,24 @@ struct SaleItem
     Money subtotal;
 };
 
+// One tender of a (possibly split) sale: e.g. "Cash" 500.00, "Mobile Money"
+// 1249.77 with the M-Pesa code as the reference. Recorded in sale_payments so
+// payment-method totals are accurate even when a sale mixes methods.
+struct SalePayment
+{
+    QString method;       // "Cash" | "Card" | "Mobile Money"
+    Money   amount;       // net contribution to the sale total
+    QString reference;    // M-Pesa code / card ref (optional)
+};
+
+// Aggregated per-method takings over a date range (for reporting).
+struct PaymentTotal
+{
+    QString method;
+    Money   total;
+    int     count = 0;    // number of tenders
+};
+
 // ── Purchasing (suppliers / purchase orders) ───────────────────────────────
 // First ERP-facing module: the "other half" of inventory. Sales/stock_adjust-
 // ments already cover stock leaving the business; Supplier/PurchaseOrder*
@@ -211,7 +229,8 @@ public:
                    const QString &paymentMethod,
                    Money amountPaid, Money changeDue,
                    int customerId = 0,
-                   Money storeCreditUsed = Money::fromCents(0));
+                   Money storeCreditUsed = Money::fromCents(0),
+                   const QVector<SalePayment> &payments = {});
     QVector<Sale> getAllSales();
     QVector<Sale> getSalesByDateRange(const QString &startDate, const QString &endDate);
     QVector<SaleItem> getSaleItems(int saleId);
@@ -222,6 +241,11 @@ public:
     Money getTotalSalesThisMonth();
     int getTotalTransactionsToday();
     QVector<QPair<QString, int>> getTopSellingProducts(int limit);
+    // Per-method takings from sale_payments over [startDate, endDate] (inclusive,
+    // 'yyyy-MM-dd'). Accurate for split tenders; only covers sales recorded after
+    // the sale_payments table was added.
+    QVector<PaymentTotal> getPaymentTotalsByMethod(const QString &startDate,
+                                                   const QString &endDate);
 
     // Stock adjustment & history
     bool logStockAdjustment(int productId, const QString &productName,

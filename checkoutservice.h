@@ -21,9 +21,11 @@
 #define CHECKOUTSERVICE_H
 
 #include <QString>
+#include <QVector>
 
 #include "cart.h"
 #include "carttotals.h"        // CartTotals, computeCartTotals()
+#include "database.h"          // SalePayment
 
 class InventoryManager;
 class ReceiptPrinter;
@@ -44,7 +46,8 @@ public:
                                 const QString &referenceNumber,
                                 Money amountPaid, Money change,
                                 int customerId = 0,
-                                Money storeCreditUsed = Money::fromCents(0)) const;
+                                Money storeCreditUsed = Money::fromCents(0),
+                                const QVector<SalePayment> &payments = {}) const;
 
 private:
     InventoryManager *m_inventory;

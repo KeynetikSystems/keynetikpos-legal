@@ -1134,7 +1134,8 @@ void MainWindow::onCheckout()
         paymentDialog.getReferenceNumber(),
         amountPaid, change,
         paymentDialog.getCustomerId(),
-        paymentDialog.getStoreCreditUsed());
+        paymentDialog.getStoreCreditUsed(),
+        paymentDialog.getTenders());
 
     if (!result.ok) {
         QMessageBox::critical(this, "Checkout Failed",

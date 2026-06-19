@@ -33,7 +33,8 @@ CheckoutResult CheckoutService::finalizeSale(const Cart &cart,
                                              Money amountPaid,
                                              Money change,
                                              int customerId,
-                                             Money storeCreditUsed) const
+                                             Money storeCreditUsed,
+                                             const QVector<SalePayment> &payments) const
 {
     CheckoutResult result;
 
@@ -54,7 +55,7 @@ CheckoutResult CheckoutService::finalizeSale(const Cart &cart,
     // commit together, or nothing does.
     const int saleId = Database::instance().recordSale(
         saleItems, t.subtotal, t.tax, t.discount, t.total,
-        paymentMethod, amountPaid, change, customerId, storeCreditUsed);
+        paymentMethod, amountPaid, change, customerId, storeCreditUsed, payments);
 
     if (saleId < 0) {
         result.error = Database::instance().getLastError();

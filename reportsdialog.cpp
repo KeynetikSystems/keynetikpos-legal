@@ -237,38 +237,38 @@ void ReportsDialog::generateSalesByCategoryReport()
 
 void ReportsDialog::generateSalesByPaymentReport()
 {
-    QVector<Sale> sales = Database::instance().getAllSales();
-    QMap<QString, Money> paymentTotals;
-    QMap<QString, int> paymentCount;
+    const QString startDate = startDateEdit->date().toString("yyyy-MM-dd");
+    const QString endDate   = endDateEdit->date().toString("yyyy-MM-dd");
 
-    for (const Sale &sale : sales) {
-        paymentTotals[sale.paymentMethod] += sale.total;
-        paymentCount[sale.paymentMethod]++;
-    }
+    // Per-tender breakdown (split sales counted by each method, not lumped under
+    // a "Cash + M-Pesa" label); falls back to the sale's method for pre-upgrade
+    // sales — see Database::getPaymentTotalsByMethod().
+    const QVector<PaymentTotal> totals =
+        Database::instance().getPaymentTotalsByMethod(startDate, endDate);
 
     reportTable->setColumnCount(3);
-    reportTable->setHorizontalHeaderLabels({"Payment Method", "Total Sales", "Transactions"});
+    reportTable->setHorizontalHeaderLabels({"Payment Method", "Amount", "Tenders"});
     reportTable->setRowCount(0);
 
     reportData.clear();
     Money grandTotal;
 
-    for (auto it = paymentTotals.begin(); it != paymentTotals.end(); ++it) {
+    for (const PaymentTotal &pt : totals) {
         int row = reportTable->rowCount();
         reportTable->insertRow(row);
 
-        reportTable->setItem(row, 0, new QTableWidgetItem(it.key()));
-        reportTable->setItem(row, 1, new QTableWidgetItem(money2(it.value())));
-        reportTable->setItem(row, 2, new QTableWidgetItem(QString::number(paymentCount[it.key()])));
+        reportTable->setItem(row, 0, new QTableWidgetItem(pt.method));
+        reportTable->setItem(row, 1, new QTableWidgetItem(money2(pt.total)));
+        reportTable->setItem(row, 2, new QTableWidgetItem(QString::number(pt.count)));
 
-        grandTotal += it.value();
+        grandTotal += pt.total;
 
         QStringList rowData;
-        rowData << it.key() << money2(it.value()) << QString::number(paymentCount[it.key()]);
+        rowData << pt.method << money2(pt.total) << QString::number(pt.count);
         reportData.append(rowData);
     }
 
-    summaryLabel->setText(QString("Total Sales Across All Payment Methods: %1").arg(formatMoney(grandTotal)));
+    summaryLabel->setText(QString("Total Across All Payment Methods: %1").arg(formatMoney(grandTotal)));
 }
 
 void ReportsDialog::generateTopSellingProductsReport()

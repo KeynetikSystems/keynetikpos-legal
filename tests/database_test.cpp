@@ -15,6 +15,7 @@
 // =============================================================================
 #include <QtTest>
 #include <QTemporaryDir>
+#include <QDate>
 
 #include "database.h"
 
@@ -87,6 +88,31 @@ private slots:
         const int saleId = dbi().recordSale({}, m(0), m(0), m(0), m(0), "Cash", m(0), m(0));
         QCOMPARE(saleId, -1);
         QVERIFY(dbi().getAllSales().isEmpty());
+    }
+
+    void recordSale_persistsSplitTenders()
+    {
+        const int pid = addProduct("SPLIT1", m(10000), 10);
+        QVector<SaleItem> items { line(pid, "Test SPLIT1", 1, m(10000)) };
+        QVector<SalePayment> pays {
+            { "Cash",         m(4000), QString() },
+            { "Mobile Money", m(6000), "SLJ7X8K2P0" },
+        };
+        const int saleId = dbi().recordSale(items, m(10000), m(0), m(0), m(10000),
+                                            "Cash + Mobile Money", m(10000), m(0),
+                                            0, m(0), pays);
+        QVERIFY(saleId > 0);
+
+        const QString today = QDate::currentDate().toString("yyyy-MM-dd");
+        const auto totals = dbi().getPaymentTotalsByMethod(today, today);
+
+        qint64 cash = -1, mpesa = -1;
+        for (const PaymentTotal &t : totals) {
+            if (t.method == "Cash")         cash  = t.total.cents();
+            if (t.method == "Mobile Money") mpesa = t.total.cents();
+        }
+        QCOMPARE(cash,  qint64(4000));
+        QCOMPARE(mpesa, qint64(6000));
     }
 
     void recordSale_insufficientStockRollsBackEverything()
