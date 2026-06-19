@@ -96,6 +96,7 @@ set(PROJECT_SOURCES
     customerdialog.cpp customerdialog.h
     MessageSchedule.h
     licensemanager.h licensemanager.cpp
+    mpesaclient.h mpesaclient.cpp
     antidebug.h
     ${QT_RESOURCE_FILE}
     ${WINDOWS_RC_FILE}

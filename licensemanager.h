@@ -93,6 +93,13 @@ public:
     int          offlineDaysRemaining() const;
     bool         wasTampered()          const;
     QString      maskedKey()            const;
+
+    // Activation-server base URL (the Cloudflare Worker) and the stored CD key.
+    // Exposed so integrations that share the same backend — e.g. M-Pesa STK
+    // push — can authenticate as this licensed till. licenseKey() is empty while
+    // on trial (no server-side key), so callers must handle the unlicensed case.
+    static QString serverBaseUrl();
+    QString        licenseKey() const;
     // Checks that the supplied key passes format + checksum validation without
     // changing any stored state. Used by the password-recovery dialog to verify
     // that the caller possesses the license key before allowing a reset.

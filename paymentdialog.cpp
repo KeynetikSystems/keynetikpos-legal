@@ -14,6 +14,7 @@
 #include "paymentdialog.h"
 #include "appstyle.h"
 #include "cart.h"          // formatMoney(), currencySymbol()
+#include "mpesaclient.h"
 #include <QVBoxLayout>
 #include <QHBoxLayout>
 #include <QGroupBox>
@@ -131,6 +132,46 @@ void PaymentDialog::setupUI()
             referenceEdit->setText(up);
             referenceEdit->setCursorPosition(pos);
         }
+    });
+
+    // ── M-Pesa STK push row (visible only in Mobile Money mode) ──────────────
+    QHBoxLayout *stkLayout = new QHBoxLayout();
+    m_phoneEdit = new QLineEdit();
+    m_phoneEdit->setPlaceholderText("Customer phone e.g. 0712345678");
+    m_phoneEdit->setProperty("textScale", "md");
+    stkLayout->addWidget(m_phoneEdit, 1);
+    m_stkButton = new QPushButton("Send M-Pesa Prompt");
+    m_stkButton->setProperty("kind", "info");
+    connect(m_stkButton, &QPushButton::clicked, this, &PaymentDialog::onStkPushClicked);
+    stkLayout->addWidget(m_stkButton);
+    amountLayout->addLayout(stkLayout);
+
+    m_stkStatus = new QLabel();
+    m_stkStatus->setProperty("role", "banner");
+    m_stkStatus->setProperty("kind", "info");
+    m_stkStatus->setWordWrap(true);
+    m_stkStatus->hide();
+    amountLayout->addWidget(m_stkStatus);
+
+    m_mpesa = new MpesaClient(this);
+    connect(m_mpesa, &MpesaClient::statusChanged, this, [this](const QString &m) {
+        setStyleProperty(m_stkStatus, "kind", "info");
+        m_stkStatus->setText(m);
+        m_stkStatus->show();
+    });
+    connect(m_mpesa, &MpesaClient::promptSent, this, [this](const QString &m) {
+        m_stkStatus->setText(m);
+    });
+    connect(m_mpesa, &MpesaClient::paymentConfirmed, this, [this](const QString &receipt) {
+        referenceEdit->setText(receipt);        // record the M-Pesa code on the sale
+        accept();                                // auto-confirm the payment
+    });
+    connect(m_mpesa, &MpesaClient::paymentFailed, this, [this](const QString &reason) {
+        setStyleProperty(m_stkStatus, "kind", "danger");
+        m_stkStatus->setText(reason + "  You can still enter the code manually below.");
+        m_stkStatus->show();
+        m_stkButton->setEnabled(MpesaClient::isAvailable());
+        m_phoneEdit->setEnabled(true);
     });
 
     changeLabel = new QLabel("Change: " + formatMoney(Money()));
@@ -290,6 +331,23 @@ void PaymentDialog::onPaymentMethodChanged()
     // perpetual "Change: 0.00" is just noise there.
     changeLabel->setVisible(selectedId == 0 || selectedId == 3);
 
+    // M-Pesa STK push controls only in Mobile Money mode.
+    const bool mobile = (selectedId == 2);
+    m_phoneEdit->setVisible(mobile);
+    m_stkButton->setVisible(mobile);
+    if (!mobile) {
+        m_stkStatus->hide();
+    } else {
+        m_phoneEdit->setEnabled(true);
+        const bool avail = MpesaClient::isAvailable();
+        m_stkButton->setEnabled(avail);
+        m_stkButton->setToolTip(avail ? QString()
+            : "Activate this till's licence to trigger M-Pesa prompts — "
+              "you can still type the code manually.");
+        if (m_hasCustomer && !m_customer.phone.isEmpty() && m_phoneEdit->text().isEmpty())
+            m_phoneEdit->setText(m_customer.phone);
+    }
+
     calculateChange();
 }
 
@@ -345,6 +403,26 @@ void PaymentDialog::onConfirmClicked()
     }
 
     accept();
+}
+
+void PaymentDialog::onStkPushClicked()
+{
+    QString digits = m_phoneEdit->text();
+    digits.remove(QRegularExpression("\\D"));
+    if (digits.length() < 9) {
+        setStyleProperty(m_stkStatus, "kind", "danger");
+        m_stkStatus->setText("Enter the customer's phone number (e.g. 0712345678).");
+        m_stkStatus->show();
+        m_phoneEdit->setFocus();
+        return;
+    }
+    m_stkButton->setEnabled(false);
+    m_phoneEdit->setEnabled(false);
+    m_stkStatus->show();
+    // total is the outstanding amount (already reduced by any store credit /
+    // loyalty applied above). M-Pesa is charged whole shillings.
+    m_mpesa->requestPayment(m_phoneEdit->text().trimmed(),
+                            Money::fromMajor(total), "POS");
 }
 
 void PaymentDialog::setCustomer(const Customer &customer)

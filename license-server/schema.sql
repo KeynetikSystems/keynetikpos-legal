@@ -17,3 +17,31 @@ CREATE TABLE IF NOT EXISTS activations (
     activated_at TEXT NOT NULL DEFAULT (datetime('now')),
     PRIMARY KEY (key, device_id)
 );
+
+-- M-Pesa payment idempotency log.
+-- Prevents double key assignment when Daraja retries callbacks.
+CREATE TABLE IF NOT EXISTS transactions (
+    transaction_id TEXT PRIMARY KEY,                    -- CheckoutRequestID or TransID
+    phone          TEXT NOT NULL,
+    amount         TEXT,
+    key_assigned   TEXT NOT NULL,
+    processed_at   TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+-- In-store M-Pesa STK Push requests initiated by a till (POS checkout).
+-- Separate from `transactions` (which assigns license keys): these just track a
+-- single customer payment so the till can poll for the result. The till creates
+-- the row (status 'pending') and Daraja's callback updates it.
+CREATE TABLE IF NOT EXISTS stk_requests (
+    checkout_id   TEXT PRIMARY KEY,                     -- Daraja CheckoutRequestID
+    merchant_id   TEXT,                                 -- Daraja MerchantRequestID
+    license_key   TEXT,                                 -- normalized key of the till
+    phone         TEXT NOT NULL,                        -- 2547XXXXXXXX
+    amount        INTEGER NOT NULL,                     -- whole KES (M-Pesa has no cents)
+    account_ref   TEXT,
+    status        TEXT NOT NULL DEFAULT 'pending',      -- pending | success | failed
+    mpesa_receipt TEXT,                                 -- e.g. SLJ7X8K2P0
+    result_desc   TEXT,
+    created_at    TEXT NOT NULL DEFAULT (datetime('now')),
+    updated_at    TEXT
+);

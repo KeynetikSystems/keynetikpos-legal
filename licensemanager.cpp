@@ -64,6 +64,9 @@ QString LicenseManager::readStoredKey() const {
     return s.value("License/CDKey", "").toString();
 }
 
+QString LicenseManager::serverBaseUrl() { return SERVER_URL; }
+QString LicenseManager::licenseKey() const { return readStoredKey(); }
+
 QDateTime LicenseManager::readInstallDate() const {
     QSettings s(QSettings::NativeFormat, QSettings::UserScope, REG_ORG, REG_APP);
     QString iso = s.value("License/InstallDate", "").toString();

@@ -92,6 +92,42 @@ wrangler d1 execute keynetik-license --remote `
 
 (Keys are stored normalized: uppercase, dashes stripped.)
 
+## In-store M-Pesa STK Push (POS checkout)
+
+The Worker can trigger a Daraja STK Push so a till can charge a customer at
+checkout and auto-confirm — the till never holds Daraja credentials.
+
+| Endpoint | Called by | Notes |
+|---|---|---|
+| `POST /pos/mpesa/stkpush` | the till (`MpesaClient`) | auth `X-License-Key` + `X-Device-Id`; body `{phone, amount, accountRef}`; returns `{ok,checkoutId}` |
+| `GET /pos/mpesa/status?checkout_id=` | the till, polling | returns `{status:"pending\|success\|failed", receipt}` |
+| `POST /pos/mpesa/callback` | Safaricom (Daraja) | set this as the STK CallBackURL; updates the request, never assigns keys |
+
+Set up (one time):
+
+```powershell
+cd license-server
+wrangler d1 execute keynetik-license --remote --file=schema.sql   # adds stk_requests
+
+wrangler secret put MPESA_CONSUMER_KEY
+wrangler secret put MPESA_CONSUMER_SECRET
+wrangler secret put MPESA_SHORTCODE       # sandbox: 174379
+wrangler secret put MPESA_PASSKEY
+# vars (wrangler.toml [vars] or --var): MPESA_ENV=sandbox|production,
+#                                       MPESA_TXN_TYPE=paybill|buygoods
+wrangler deploy
+```
+
+In the Daraja portal, set the app's STK callback URL to
+`https://<your-worker>/pos/mpesa/callback`. A till only gets STK if it's
+licensed (activated key); otherwise the cashier enters the M-Pesa code manually.
+
+> **Note:** M-Pesa charges whole shillings, so the STK amount is the cart total
+> rounded to the nearest shilling. **The `/pos/mpesa/callback` is unauthenticated**
+> (Safaricom can't sign callbacks). It only flips a server-generated, unguessable
+> `CheckoutRequestID` to success/failed, but for production consider restricting
+> it to Safaricom's published IP ranges.
+
 ## Notes
 
 - A key must exist in the `keys` table before `/activate` accepts it — minting

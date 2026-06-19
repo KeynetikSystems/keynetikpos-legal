@@ -29,6 +29,7 @@
 #include "database.h"   // Customer
 
 class QRegularExpressionValidator;
+class MpesaClient;
 
 class PaymentDialog : public QDialog
 {
@@ -59,6 +60,7 @@ private slots:
     void onPaymentMethodChanged();
     void onAmountPaidChanged();
     void onConfirmClicked();
+    void onStkPushClicked();   // trigger an M-Pesa STK push to the customer's phone
 
 private:
     void setupUI();
@@ -76,6 +78,12 @@ private:
     QLineEdit *referenceEdit;
     QRegularExpressionValidator *m_mpesaValidator { nullptr };  // [A-Za-z0-9]{0,10}
     QLabel *changeLabel;
+
+    // M-Pesa STK push (shown only in Mobile Money mode)
+    QLineEdit   *m_phoneEdit  { nullptr };
+    QPushButton *m_stkButton  { nullptr };
+    QLabel      *m_stkStatus  { nullptr };
+    MpesaClient *m_mpesa      { nullptr };
     QPushButton *confirmBtn;
     QPushButton *cancelBtn;
 
