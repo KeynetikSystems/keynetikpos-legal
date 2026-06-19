@@ -80,6 +80,9 @@ QString flatChrome()
         QDateEdit:focus, QTimeEdit:focus, QDateTimeEdit:focus {
             border: 2px solid %focus%; }
         QComboBox::drop-down { border: none; width: 20px; }
+        QComboBox::down-arrow { image: none; width: 0; height: 0;
+            border-left: 5px solid transparent; border-right: 5px solid transparent;
+            border-top: 6px solid %text%; margin-right: 8px; }
         QComboBox QAbstractItemView { background-color: %inputBg%; color: %text%;
             selection-background-color: %accent%; selection-color: white; }
 
@@ -156,6 +159,9 @@ QString glossyChrome(const ColorScheme &s)
         QLineEdit:focus, QComboBox:focus, QSpinBox:focus, QDoubleSpinBox:focus {
             border: 1px solid %FOCUS%; }
         QComboBox::drop-down { border: none; width: 20px; }
+        QComboBox::down-arrow { image: none; width: 0; height: 0;
+            border-left: 5px solid transparent; border-right: 5px solid transparent;
+            border-top: 6px solid %TEXT%; margin-right: 8px; }
         QComboBox QAbstractItemView { background: #ffffff; color: %TEXT%;
             selection-background-color: %ACCENT%; selection-color: white; }
 
@@ -286,6 +292,25 @@ QString semanticPart()
     )");
 }
 
+// Slim, themed scrollbars. Added to every theme EXCEPT Native (which keeps the
+// OS scrollbars). Without this the app inherited the base style's scrollbars —
+// e.g. a light native bar on the Dark theme. Uses %tokens%.
+QString scrollbarRules()
+{
+    return QString(R"(
+        QScrollBar:vertical   { background: %bgPrimary%; width: 12px;  margin: 0; border: none; }
+        QScrollBar:horizontal { background: %bgPrimary%; height: 12px; margin: 0; border: none; }
+        QScrollBar::handle:vertical   { background: %border%; min-height: 28px;
+            border-radius: 6px; margin: 2px; }
+        QScrollBar::handle:horizontal { background: %border%; min-width: 28px;
+            border-radius: 6px; margin: 2px; }
+        QScrollBar::handle:hover { background: %textSecondary%; }
+        QScrollBar::add-line, QScrollBar::sub-line { width: 0; height: 0; background: none; border: none; }
+        QScrollBar::add-page, QScrollBar::sub-page { background: transparent; }
+        QAbstractScrollArea::corner { background: %bgPrimary%; border: none; }
+    )");
+}
+
 } // namespace
 
 QString appStylesheet(AppTheme theme)
@@ -298,6 +323,8 @@ QString appStylesheet(AppTheme theme)
     else if (theme != AppTheme::Native)   // Native: no chrome — let the OS style render
         sheet = flatChrome();
     sheet += semanticPart();
+    if (theme != AppTheme::Native)        // keep native scrollbars under Native
+        sheet += scrollbarRules();
 
     // Corner radii — Classic squares them off for the WinForms look.
     const bool squared = (theme == AppTheme::Classic);
