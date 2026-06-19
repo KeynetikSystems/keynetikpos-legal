@@ -18,7 +18,15 @@
 #include <QHBoxLayout>
 #include <QGroupBox>
 #include <QMessageBox>
+#include <QRegularExpression>
+#include <QRegularExpressionValidator>
+#include <QSignalBlocker>
 #include <cmath>
+
+namespace {
+// M-Pesa confirmation codes are 10 alphanumeric characters (e.g. SLJ7X8K2P0).
+const QRegularExpression kMpesaCode("^[A-Z0-9]{10}$");
+}
 
 PaymentDialog::PaymentDialog(Money totalAmount, QWidget *parent)
     : QDialog(parent)
@@ -105,11 +113,25 @@ void PaymentDialog::setupUI()
     referenceTitleLabel = new QLabel("Reference No:");
     refLayout->addWidget(referenceTitleLabel);
     referenceEdit = new QLineEdit();
-    referenceEdit->setPlaceholderText("M-Pesa / card transaction code");
     referenceEdit->setProperty("textScale", "md");
     referenceEdit->setAccessibleName("Transaction reference number");
     refLayout->addWidget(referenceEdit);
     amountLayout->addLayout(refLayout);
+
+    // While in M-Pesa mode, restrict input to up to 10 alphanumerics and force
+    // upper-case live so the cashier can type the code from the SMS as-is.
+    m_mpesaValidator = new QRegularExpressionValidator(
+        QRegularExpression("[A-Za-z0-9]{0,10}"), this);
+    connect(referenceEdit, &QLineEdit::textChanged, this, [this](const QString &t) {
+        if (paymentMethod != "Mobile Money") return;
+        const QString up = t.toUpper();
+        if (up != t) {
+            const int pos = referenceEdit->cursorPosition();
+            QSignalBlocker blocker(referenceEdit);
+            referenceEdit->setText(up);
+            referenceEdit->setCursorPosition(pos);
+        }
+    });
 
     changeLabel = new QLabel("Change: " + formatMoney(Money()));
     changeLabel->setProperty("kind", "success");
@@ -241,12 +263,32 @@ void PaymentDialog::onPaymentMethodChanged()
         break;
     }
 
-    // Reference number only applies to non-cash payments
-    const bool nonCash = (selectedId != 0);
-    referenceTitleLabel->setEnabled(nonCash);
-    referenceEdit->setEnabled(nonCash);
-    if (!nonCash)
-        referenceEdit->clear();
+    // Reference field — method-specific. Cleared on every switch so a card ref
+    // can't linger as an "M-Pesa code".
+    const bool needRef = (selectedId != 0);
+    referenceEdit->clear();
+    referenceTitleLabel->setVisible(needRef);
+    referenceEdit->setVisible(needRef);
+
+    if (selectedId == 2) {            // Mobile Money (M-Pesa)
+        referenceTitleLabel->setText("M-Pesa Code: *");
+        referenceEdit->setPlaceholderText("10-char code, e.g. SLJ7X8K2P0");
+        referenceEdit->setValidator(m_mpesaValidator);
+        referenceEdit->setFocus();
+    } else if (selectedId == 1) {     // Card
+        referenceTitleLabel->setText("Card Ref:");
+        referenceEdit->setPlaceholderText("Card transaction reference (optional)");
+        referenceEdit->setValidator(nullptr);
+    } else if (selectedId == 3) {     // Multiple
+        referenceTitleLabel->setText("Reference:");
+        referenceEdit->setPlaceholderText("Reference (optional)");
+        referenceEdit->setValidator(nullptr);
+    }
+
+    // "Change" is only meaningful when the tendered amount can differ from the
+    // total — cash or a split. Card/M-Pesa are charged the exact total, so the
+    // perpetual "Change: 0.00" is just noise there.
+    changeLabel->setVisible(selectedId == 0 || selectedId == 3);
 
     calculateChange();
 }
@@ -287,12 +329,19 @@ void PaymentDialog::onConfirmClicked()
     if (change < 0)
         return; // button is disabled in this state; belt-and-braces
 
-    if (paymentMethod == "Mobile Money" &&
-        referenceEdit->text().trimmed().isEmpty()) {
-        QMessageBox::warning(this, "Reference Required",
-                             "Please enter the M-Pesa transaction code.");
-        referenceEdit->setFocus();
-        return;
+    if (paymentMethod == "Mobile Money") {
+        const QString code = referenceEdit->text().trimmed().toUpper();
+        if (!kMpesaCode.match(code).hasMatch()) {
+            QMessageBox::warning(this, "M-Pesa Code Required",
+                code.isEmpty()
+                    ? "Enter the 10-character M-Pesa confirmation code from the "
+                      "customer's payment SMS (e.g. SLJ7X8K2P0)."
+                    : "That doesn't look like an M-Pesa code — it should be 10 "
+                      "letters/numbers (e.g. SLJ7X8K2P0).");
+            referenceEdit->setFocus();
+            return;
+        }
+        referenceEdit->setText(code);   // persist the normalized (upper-case) code
     }
 
     accept();

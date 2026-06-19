@@ -28,6 +28,8 @@
 #include "money.h"
 #include "database.h"   // Customer
 
+class QRegularExpressionValidator;
+
 class PaymentDialog : public QDialog
 {
     Q_OBJECT
@@ -72,6 +74,7 @@ private:
     QDoubleSpinBox *amountPaidSpin;
     QLabel *referenceTitleLabel;
     QLineEdit *referenceEdit;
+    QRegularExpressionValidator *m_mpesaValidator { nullptr };  // [A-Za-z0-9]{0,10}
     QLabel *changeLabel;
     QPushButton *confirmBtn;
     QPushButton *cancelBtn;
