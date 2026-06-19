@@ -175,7 +175,6 @@ bool WhatsAppManager::sendZReport(const QString &recipientPhone,
 void WhatsAppManager::onReplyFinished(QNetworkReply *reply)
 {
     QString status;
-    bool success = false;
     QString messageId;
     const QString recipient = reply->property("recipient").toString();
 
@@ -189,7 +188,6 @@ void WhatsAppManager::onReplyFinished(QNetworkReply *reply)
             messageId = obj["sid"].toString();
             QString messageStatus = obj["status"].toString();
 
-            success = true;
             status = QString("Message sent successfully!\nMessage ID: %1\nStatus: %2")
                          .arg(messageId, messageStatus);
 

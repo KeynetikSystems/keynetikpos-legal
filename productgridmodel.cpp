@@ -96,16 +96,28 @@ ProductFilterProxy::ProductFilterProxy(QObject *parent)
 {
 }
 
+// invalidateFilter() is the only filter-refresh API stable across the Qt
+// versions we build against (the newer begin/endFilterChange() is 6.11-only,
+// and invalidateRowsFilter() is itself deprecated in 6.11). Silence the
+// deprecation locally rather than fork on QT_VERSION.
+void ProductFilterProxy::refreshFilter()
+{
+    QT_WARNING_PUSH
+    QT_WARNING_DISABLE_DEPRECATED
+    invalidateFilter();
+    QT_WARNING_POP
+}
+
 void ProductFilterProxy::setSearchText(const QString &text)
 {
     m_search = text.trimmed();
-    invalidateFilter();
+    refreshFilter();
 }
 
 void ProductFilterProxy::setCategory(const QString &category)
 {
     m_category = (category == "All Categories") ? QString() : category;
-    invalidateFilter();
+    refreshFilter();
 }
 
 bool ProductFilterProxy::filterAcceptsRow(int sourceRow,

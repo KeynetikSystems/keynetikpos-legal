@@ -78,6 +78,8 @@ protected:
                           const QModelIndex &sourceParent) const override;
 
 private:
+    void refreshFilter();   // re-runs row filtering (deprecation-safe wrapper)
+
     QString m_search;
     QString m_category;
 };

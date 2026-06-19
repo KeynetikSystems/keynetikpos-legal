@@ -40,35 +40,12 @@ static QString money2(Money m) { return QString::number(m.toMajor(), 'f', 2); }
 #include <QCloseEvent>
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Anonymous helpers
-// ─────────────────────────────────────────────────────────────────────────────
-namespace {
-
-QString getStatusIcon(InventoryStatus status)
-{
-    // Status is shown as plain text (getStatusText); no icon glyphs.
-    switch (status) {
-    case InventoryStatus::Healthy:    return "";
-    case InventoryStatus::Low:        return "";
-    case InventoryStatus::Critical:   return "";
-    case InventoryStatus::OutOfStock: return "";
-    default:                          return "";
-    }
-}
-
-} // anonymous namespace
-
-// ─────────────────────────────────────────────────────────────────────────────
 // Constructor / Destructor
 // ─────────────────────────────────────────────────────────────────────────────
 
 InventoryDialog::InventoryDialog(InventoryManager *manager, QWidget *parent)
     : QDialog(parent)
     , inventoryManager(manager)
-    , selectedProductId(-1)
-    , hasUnsavedChanges(false)
-    , autoSaveEnabled(false)
-    , changesPending(0)
     // ── null-initialise every widget pointer up front ────────────────────────
     , tabWidget(nullptr)
     , inventoryTable(nullptr)
@@ -97,6 +74,11 @@ InventoryDialog::InventoryDialog(InventoryManager *manager, QWidget *parent)
     , slowMovingLabel(nullptr)
     , autoRefreshCheckBox(nullptr)
     , lastUpdatedLabel(nullptr)
+    // ── state members (declared after the widgets in the header) ─────────────
+    , selectedProductId(-1)
+    , hasUnsavedChanges(false)
+    , autoSaveEnabled(false)
+    , changesPending(0)
 {
     setWindowTitle("Inventory Management");
     resize(1200, 800);
@@ -1608,21 +1590,21 @@ void InventoryDialog::onPrintClicked()
 void InventoryDialog::onInventoryUpdated(int, int) {}
 void InventoryDialog::onInventoryRestocked(int, int) {}
 
-void InventoryDialog::onQuickRestockClicked(int productId)
+void InventoryDialog::onQuickRestockClicked(int /*productId*/)
 {
-
+    // TODO
 }
-void InventoryDialog::onCategoryFilterChanged(const QString &category)
+void InventoryDialog::onCategoryFilterChanged(const QString & /*category*/)
 {
     // TODO
 }
 
-void InventoryDialog::onSortByChanged(int index)
+void InventoryDialog::onSortByChanged(int /*index*/)
 {
     // TODO
 }
 
-void InventoryDialog::onCellDoubleClicked(int row, int column)
+void InventoryDialog::onCellDoubleClicked(int /*row*/, int /*column*/)
 {
     // TODO
 }
