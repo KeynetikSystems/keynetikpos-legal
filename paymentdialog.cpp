@@ -1,408 +1,318 @@
 // =============================================================================
-// paymentdialog.cpp — Implementation of PaymentDialog (see paymentdialog.h for
-// the full WHAT/HOW/WHY).
+// paymentdialog.cpp — Implementation of PaymentDialog (see paymentdialog.h).
 // -----------------------------------------------------------------------------
 // Implementation notes:
-//  - The amount is a QDoubleSpinBox, so only valid currency values can be
-//    entered. calculateChange() re-runs on every change; Confirm is disabled
-//    while the tendered amount is below the total, so an under-payment can
-//    never reach Database::recordSale().
-//  - Non-cash methods preset the amount to the exact total (no change due)
-//    and enable the transaction-reference field; Mobile Money requires it
-//    (M-Pesa always issues a confirmation code).
+//  - Each method is a checkbox revealing a detail panel; recompute() sums the
+//    active panels and drives the Remaining/Change line and the Confirm button.
+//  - Ticking a method prefills its amount with whatever is still outstanding, so
+//    the common single-tender case is one click; for a split the cashier edits
+//    the amounts and the remainder follows.
+//  - M-Pesa: the STK push charges the M-Pesa panel's amount (whole shillings);
+//    a confirmed push fills the receipt code, which onConfirmClicked validates.
 // =============================================================================
 #include "paymentdialog.h"
 #include "appstyle.h"
 #include "cart.h"          // formatMoney(), currencySymbol()
 #include "mpesaclient.h"
+
 #include <QVBoxLayout>
 #include <QHBoxLayout>
+#include <QFormLayout>
 #include <QGroupBox>
 #include <QMessageBox>
 #include <QRegularExpression>
 #include <QRegularExpressionValidator>
 #include <QSignalBlocker>
+#include <QStringList>
+#include <algorithm>
 #include <cmath>
 
 namespace {
 // M-Pesa confirmation codes are 10 alphanumeric characters (e.g. SLJ7X8K2P0).
 const QRegularExpression kMpesaCode("^[A-Z0-9]{10}$");
+constexpr double kEps = 0.0001;
+
+QDoubleSpinBox *makeAmount(const QString &prefix)
+{
+    auto *s = new QDoubleSpinBox();
+    s->setRange(0.0, 9999999.99);
+    s->setDecimals(2);
+    s->setPrefix(prefix + " ");
+    s->setButtonSymbols(QAbstractSpinBox::NoButtons);
+    s->setProperty("textScale", "lg");
+    s->setProperty("role", "control");
+    return s;
 }
+} // namespace
 
 PaymentDialog::PaymentDialog(Money totalAmount, QWidget *parent)
     : QDialog(parent)
     , total(totalAmount.toMajor())
     , amountPaid(0.0)
     , change(0.0)
-    , paymentMethod("Cash")
 {
     setWindowTitle("Process Payment");
     setModal(true);
     setupUI();
+    recompute();
 }
 
-PaymentDialog::~PaymentDialog()
+PaymentDialog::~PaymentDialog() {}
+
+double PaymentDialog::dueMajor() const { return std::max(0.0, total); }
+
+double PaymentDialog::enteredMajor() const
 {
+    double sum = 0.0;
+    if (cashCheck->isChecked())  sum += cashAmount->value();
+    if (cardCheck->isChecked())  sum += cardAmount->value();
+    if (mpesaCheck->isChecked()) sum += mpesaAmount->value();
+    return sum;
 }
 
 void PaymentDialog::setupUI()
 {
-    resize(450, 400);
-
+    setMinimumWidth(460);
     QVBoxLayout *mainLayout = new QVBoxLayout(this);
 
-    // Total amount display — themed banner (was hardcoded light-blue, which
-    // broke in dark mode)
-    totalLabel = new QLabel("Total Amount: " + formatMoney(Money::fromMajor(total)));
+    // ── Amount due banner ────────────────────────────────────────────────────
+    totalLabel = new QLabel();
     totalLabel->setProperty("role", "banner");
     totalLabel->setProperty("kind", "success");
     totalLabel->setProperty("textScale", "2xl");
     totalLabel->setAlignment(Qt::AlignCenter);
     mainLayout->addWidget(totalLabel);
 
-    mainLayout->addSpacing(20);
-
-    // Payment method selection
-    QGroupBox *paymentMethodGroup = new QGroupBox("Select Payment Method");
-    QVBoxLayout *methodLayout = new QVBoxLayout(paymentMethodGroup);
-
-    this->paymentMethodGroup = new QButtonGroup(this);
-
-    // Payment-method radios share one look; tag them and let appstyle size them.
-    auto addMethodRadio = [&](const QString &text, const QString &accName,
-                              int id) {
-        QRadioButton *r = new QRadioButton(text);
-        r->setProperty("textScale", "lg");
-        r->setProperty("role", "control");
-        r->setAccessibleName(accName);
-        this->paymentMethodGroup->addButton(r, id);
-        methodLayout->addWidget(r);
-        return r;
-    };
-
-    cashRadio = addMethodRadio("Cash", "Pay with cash", 0);
-    cashRadio->setChecked(true);
-    cardRadio     = addMethodRadio("Credit/Debit Card", "Pay by card", 1);
-    mobileRadio   = addMethodRadio("Mobile Money (M-Pesa)",
-                                   "Pay with M-Pesa mobile money", 2);
-    multipleRadio = addMethodRadio("Multiple Payment Methods",
-                                   "Split across multiple payment methods", 3);
-
-    mainLayout->addWidget(paymentMethodGroup);
-
-    mainLayout->addSpacing(10);
-
-    // Amount paid section
-    QGroupBox *amountGroup = new QGroupBox("Payment Details");
-    QVBoxLayout *amountLayout = new QVBoxLayout(amountGroup);
-
-    QHBoxLayout *inputLayout = new QHBoxLayout();
-    inputLayout->addWidget(new QLabel("Amount Paid:"));
-    amountPaidSpin = new QDoubleSpinBox();
-    amountPaidSpin->setRange(0.0, 9999999.99);
-    amountPaidSpin->setDecimals(2);
-    amountPaidSpin->setPrefix(currencySymbol() + " ");
-    amountPaidSpin->setValue(total);
-    amountPaidSpin->setButtonSymbols(QAbstractSpinBox::NoButtons);
-    amountPaidSpin->setProperty("textScale", "xl");
-    amountPaidSpin->setProperty("role", "control");
-    amountPaidSpin->setAccessibleName("Amount tendered");
-    inputLayout->addWidget(amountPaidSpin);
-    amountLayout->addLayout(inputLayout);
-
-    QHBoxLayout *refLayout = new QHBoxLayout();
-    referenceTitleLabel = new QLabel("Reference No:");
-    refLayout->addWidget(referenceTitleLabel);
-    referenceEdit = new QLineEdit();
-    referenceEdit->setProperty("textScale", "md");
-    referenceEdit->setAccessibleName("Transaction reference number");
-    refLayout->addWidget(referenceEdit);
-    amountLayout->addLayout(refLayout);
-
-    // While in M-Pesa mode, restrict input to up to 10 alphanumerics and force
-    // upper-case live so the cashier can type the code from the SMS as-is.
-    m_mpesaValidator = new QRegularExpressionValidator(
-        QRegularExpression("[A-Za-z0-9]{0,10}"), this);
-    connect(referenceEdit, &QLineEdit::textChanged, this, [this](const QString &t) {
-        if (paymentMethod != "Mobile Money") return;
-        const QString up = t.toUpper();
-        if (up != t) {
-            const int pos = referenceEdit->cursorPosition();
-            QSignalBlocker blocker(referenceEdit);
-            referenceEdit->setText(up);
-            referenceEdit->setCursorPosition(pos);
-        }
-    });
-
-    // ── M-Pesa STK push row (visible only in Mobile Money mode) ──────────────
-    QHBoxLayout *stkLayout = new QHBoxLayout();
-    m_phoneEdit = new QLineEdit();
-    m_phoneEdit->setPlaceholderText("Customer phone e.g. 0712345678");
-    m_phoneEdit->setProperty("textScale", "md");
-    stkLayout->addWidget(m_phoneEdit, 1);
-    m_stkButton = new QPushButton("Send M-Pesa Prompt");
-    m_stkButton->setProperty("kind", "info");
-    connect(m_stkButton, &QPushButton::clicked, this, &PaymentDialog::onStkPushClicked);
-    stkLayout->addWidget(m_stkButton);
-    amountLayout->addLayout(stkLayout);
-
-    m_stkStatus = new QLabel();
-    m_stkStatus->setProperty("role", "banner");
-    m_stkStatus->setProperty("kind", "info");
-    m_stkStatus->setWordWrap(true);
-    m_stkStatus->hide();
-    amountLayout->addWidget(m_stkStatus);
-
-    m_mpesa = new MpesaClient(this);
-    connect(m_mpesa, &MpesaClient::statusChanged, this, [this](const QString &m) {
-        setStyleProperty(m_stkStatus, "kind", "info");
-        m_stkStatus->setText(m);
-        m_stkStatus->show();
-    });
-    connect(m_mpesa, &MpesaClient::promptSent, this, [this](const QString &m) {
-        m_stkStatus->setText(m);
-    });
-    connect(m_mpesa, &MpesaClient::paymentConfirmed, this, [this](const QString &receipt) {
-        referenceEdit->setText(receipt);        // record the M-Pesa code on the sale
-        accept();                                // auto-confirm the payment
-    });
-    connect(m_mpesa, &MpesaClient::paymentFailed, this, [this](const QString &reason) {
-        setStyleProperty(m_stkStatus, "kind", "danger");
-        m_stkStatus->setText(reason + "  You can still enter the code manually below.");
-        m_stkStatus->show();
-        m_stkButton->setEnabled(MpesaClient::isAvailable());
-        m_phoneEdit->setEnabled(true);
-    });
-
-    changeLabel = new QLabel("Change: " + formatMoney(Money()));
-    changeLabel->setProperty("kind", "success");
-    changeLabel->setProperty("textScale", "xl");
-    changeLabel->setProperty("bold", "true");
-    amountLayout->addWidget(changeLabel);
-
-    // Loyalty points row — shown only when customer has points
+    // ── Loyalty + store credit (shown only when a customer is attached) ───────
     loyaltyLabel = new QLabel();
     loyaltyLabel->setProperty("role", "banner");
     loyaltyLabel->setProperty("kind", "secondary");
     loyaltyLabel->hide();
-    amountLayout->addWidget(loyaltyLabel);
+    mainLayout->addWidget(loyaltyLabel);
 
     redeemPointsButton = new QPushButton("Redeem Loyalty Points");
     redeemPointsButton->setProperty("kind", "info");
     redeemPointsButton->hide();
     connect(redeemPointsButton, &QPushButton::clicked, this, [this]() {
-        // Redeem ALL available points; cap at outstanding total
         const int availPts      = m_customer.loyaltyPoints;
         const Money creditPerPt = Money::fromCents(m_loyaltyCentsPerPt);
         const Money maxCredit   = creditPerPt * availPts;
-        const Money outstanding = Money::fromMajor(std::max(0.0, total));
+        const Money outstanding = Money::fromMajor(dueMajor());
         const Money applied     = maxCredit.cents() >= outstanding.cents()
                                       ? outstanding : maxCredit;
-        m_pointsRedeemed = static_cast<int>(applied.cents() / creditPerPt.cents());
-        const double newTotal = std::max(0.0, total - applied.toMajor());
-        amountPaidSpin->setValue(newTotal);
-        this->total = newTotal;
-        loyaltyLabel->setText(
-            QString("Redeemed %1 pts → %2 off  (remaining: %3 pts)")
-                .arg(m_pointsRedeemed)
-                .arg(formatMoney(applied))
-                .arg(availPts - m_pointsRedeemed));
+        m_pointsRedeemed = creditPerPt.cents() > 0
+                               ? static_cast<int>(applied.cents() / creditPerPt.cents()) : 0;
+        total = std::max(0.0, total - applied.toMajor());
+        loyaltyLabel->setText(QString("Redeemed %1 pts -> %2 off  (remaining: %3 pts)")
+            .arg(m_pointsRedeemed).arg(formatMoney(applied)).arg(availPts - m_pointsRedeemed));
         redeemPointsButton->setEnabled(false);
-        calculateChange();
+        recompute();
     });
-    amountLayout->addWidget(redeemPointsButton);
+    mainLayout->addWidget(redeemPointsButton);
 
-    // Store credit row — shown only when a customer is attached via setCustomer()
     creditAvailableLabel = new QLabel();
     creditAvailableLabel->setProperty("role", "banner");
     creditAvailableLabel->setProperty("kind", "info");
     creditAvailableLabel->hide();
-    amountLayout->addWidget(creditAvailableLabel);
+    mainLayout->addWidget(creditAvailableLabel);
 
     applyCreditButton = new QPushButton("Apply Store Credit");
     applyCreditButton->setProperty("kind", "info");
     applyCreditButton->hide();
     connect(applyCreditButton, &QPushButton::clicked, this, [this]() {
-        // Deduct up to the full available credit from the outstanding total.
-        const Money available = m_customer.storeCredit - m_storeCreditUsed;
-        const Money outstanding = Money::fromMajor(
-            std::max(0.0, total - m_storeCreditUsed.toMajor()));
-        m_storeCreditUsed = available.cents() >= outstanding.cents()
-                                ? outstanding : available;
-        const double newTotal = std::max(0.0, total - m_storeCreditUsed.toMajor());
-        amountPaidSpin->setValue(newTotal);
-        this->total = newTotal;
-        creditAvailableLabel->setText(
-            QString("Store credit applied: %1  (balance after: %2)")
-                .arg(formatMoney(m_storeCreditUsed))
-                .arg(formatMoney(m_customer.storeCredit - m_storeCreditUsed)));
+        const Money available   = m_customer.storeCredit - m_storeCreditUsed;
+        const Money outstanding = Money::fromMajor(dueMajor());
+        const Money add = available.cents() >= outstanding.cents() ? outstanding : available;
+        m_storeCreditUsed += add;
+        total = std::max(0.0, total - add.toMajor());
+        creditAvailableLabel->setText(QString("Store credit applied: %1  (balance after: %2)")
+            .arg(formatMoney(m_storeCreditUsed))
+            .arg(formatMoney(m_customer.storeCredit - m_storeCreditUsed)));
         applyCreditButton->setEnabled(false);
-        calculateChange();
+        recompute();
     });
-    amountLayout->addWidget(applyCreditButton);
+    mainLayout->addWidget(applyCreditButton);
 
-    mainLayout->addWidget(amountGroup);
+    // ── Method selection (checkboxes — any combination) ──────────────────────
+    QGroupBox *methodGroup = new QGroupBox("Select Payment Method(s)");
+    QVBoxLayout *methodLayout = new QVBoxLayout(methodGroup);
+    cashCheck  = new QCheckBox("Cash");
+    cardCheck  = new QCheckBox("Credit/Debit Card");
+    mpesaCheck = new QCheckBox("Mobile Money (M-Pesa)");
+    for (QCheckBox *c : { cashCheck, cardCheck, mpesaCheck }) {
+        c->setProperty("textScale", "lg");
+        methodLayout->addWidget(c);
+    }
+    mainLayout->addWidget(methodGroup);
 
-    mainLayout->addSpacing(20);
+    // ── Cash panel ────────────────────────────────────────────────────────────
+    cashBox = new QGroupBox("Cash");
+    {
+        QFormLayout *f = new QFormLayout(cashBox);
+        cashAmount = makeAmount(currencySymbol());
+        connect(cashAmount, qOverload<double>(&QDoubleSpinBox::valueChanged),
+                this, &PaymentDialog::recompute);
+        f->addRow("Cash given:", cashAmount);
+    }
+    cashBox->hide();
+    mainLayout->addWidget(cashBox);
 
-    // Buttons
+    // ── Card panel ────────────────────────────────────────────────────────────
+    cardBox = new QGroupBox("Credit/Debit Card");
+    {
+        QFormLayout *f = new QFormLayout(cardBox);
+        cardAmount = makeAmount(currencySymbol());
+        connect(cardAmount, qOverload<double>(&QDoubleSpinBox::valueChanged),
+                this, &PaymentDialog::recompute);
+        f->addRow("Card amount:", cardAmount);
+        cardRef = new QLineEdit();
+        cardRef->setPlaceholderText("Card reference (optional)");
+        f->addRow("Card ref:", cardRef);
+    }
+    cardBox->hide();
+    mainLayout->addWidget(cardBox);
+
+    // ── M-Pesa panel ──────────────────────────────────────────────────────────
+    mpesaBox = new QGroupBox("Mobile Money (M-Pesa)");
+    {
+        QFormLayout *f = new QFormLayout(mpesaBox);
+        mpesaAmount = makeAmount(currencySymbol());
+        connect(mpesaAmount, qOverload<double>(&QDoubleSpinBox::valueChanged),
+                this, &PaymentDialog::recompute);
+        f->addRow("M-Pesa amount:", mpesaAmount);
+
+        m_phoneEdit = new QLineEdit();
+        m_phoneEdit->setPlaceholderText("Customer phone e.g. 0712345678");
+        f->addRow("Phone:", m_phoneEdit);
+
+        QHBoxLayout *codeRow = new QHBoxLayout();
+        referenceEdit = new QLineEdit();
+        referenceEdit->setPlaceholderText("M-Pesa code (10 chars) — or use STK");
+        m_mpesaValidator = new QRegularExpressionValidator(
+            QRegularExpression("[A-Za-z0-9]{0,10}"), this);
+        referenceEdit->setValidator(m_mpesaValidator);
+        connect(referenceEdit, &QLineEdit::textChanged, this, [this](const QString &t) {
+            const QString up = t.toUpper();
+            if (up != t) {
+                const int pos = referenceEdit->cursorPosition();
+                QSignalBlocker b(referenceEdit);
+                referenceEdit->setText(up);
+                referenceEdit->setCursorPosition(pos);
+            }
+        });
+        codeRow->addWidget(referenceEdit, 1);
+        m_stkButton = new QPushButton("Send STK Prompt");
+        m_stkButton->setProperty("kind", "info");
+        connect(m_stkButton, &QPushButton::clicked, this, &PaymentDialog::onStkPushClicked);
+        codeRow->addWidget(m_stkButton);
+        f->addRow("M-Pesa code:", codeRow);
+
+        m_stkStatus = new QLabel();
+        m_stkStatus->setWordWrap(true);
+        m_stkStatus->hide();
+        f->addRow("", m_stkStatus);
+    }
+    mpesaBox->hide();
+    mainLayout->addWidget(mpesaBox);
+
+    m_mpesa = new MpesaClient(this);
+    connect(m_mpesa, &MpesaClient::statusChanged, this, [this](const QString &m) {
+        setStyleProperty(m_stkStatus, "kind", "info"); m_stkStatus->setText(m); m_stkStatus->show();
+    });
+    connect(m_mpesa, &MpesaClient::promptSent, this, [this](const QString &m) { m_stkStatus->setText(m); });
+    connect(m_mpesa, &MpesaClient::paymentConfirmed, this, [this](const QString &receipt) {
+        referenceEdit->setText(receipt);
+        setStyleProperty(m_stkStatus, "kind", "success");
+        m_stkStatus->setText("M-Pesa received — code " + receipt);
+        m_stkButton->setEnabled(true);
+        m_phoneEdit->setEnabled(true);
+        recompute();
+    });
+    connect(m_mpesa, &MpesaClient::paymentFailed, this, [this](const QString &reason) {
+        setStyleProperty(m_stkStatus, "kind", "danger");
+        m_stkStatus->setText(reason + "  You can also type the code manually.");
+        m_stkStatus->show();
+        m_stkButton->setEnabled(MpesaClient::isAvailable());
+        m_phoneEdit->setEnabled(true);
+    });
+
+    // Checkbox wiring — show/hide the panel, prefill the outstanding amount.
+    auto wire = [this](QCheckBox *chk, QGroupBox *box, QDoubleSpinBox *amt) {
+        connect(chk, &QCheckBox::toggled, this, [this, box, amt](bool on) {
+            box->setVisible(on);
+            if (on) {
+                if (amt->value() < kEps)
+                    amt->setValue(std::max(0.0, dueMajor() - enteredMajor()));
+            } else {
+                amt->setValue(0.0);
+            }
+            recompute();
+        });
+    };
+    wire(cashCheck, cashBox, cashAmount);
+    wire(cardCheck, cardBox, cardAmount);
+    wire(mpesaCheck, mpesaBox, mpesaAmount);
+
+    // ── Summary ────────────────────────────────────────────────────────────────
+    paidLabel = new QLabel();
+    paidLabel->setProperty("textScale", "lg");
+    mainLayout->addWidget(paidLabel);
+
+    changeLabel = new QLabel();
+    changeLabel->setProperty("kind", "success");
+    changeLabel->setProperty("textScale", "xl");
+    changeLabel->setProperty("bold", "true");
+    mainLayout->addWidget(changeLabel);
+
+    // ── Buttons ──────────────────────────────────────────────────────────────
     QHBoxLayout *buttonLayout = new QHBoxLayout();
     buttonLayout->addStretch();
-
     cancelBtn = new QPushButton("Cancel");
     cancelBtn->setProperty("kind", "danger");
     cancelBtn->setProperty("textScale", "lg");
+    connect(cancelBtn, &QPushButton::clicked, this, &QDialog::reject);
     buttonLayout->addWidget(cancelBtn);
-
     confirmBtn = new QPushButton("Confirm Payment");
     confirmBtn->setProperty("kind", "primary");
     confirmBtn->setProperty("textScale", "lg");
     confirmBtn->setDefault(true);
+    connect(confirmBtn, &QPushButton::clicked, this, &PaymentDialog::onConfirmClicked);
     buttonLayout->addWidget(confirmBtn);
-
     mainLayout->addLayout(buttonLayout);
 
-    // Connect signals
-    connect(this->paymentMethodGroup, &QButtonGroup::idClicked,
-            this, &PaymentDialog::onPaymentMethodChanged);
-    connect(amountPaidSpin, qOverload<double>(&QDoubleSpinBox::valueChanged),
-            this, &PaymentDialog::onAmountPaidChanged);
-    connect(confirmBtn, &QPushButton::clicked,
-            this, &PaymentDialog::onConfirmClicked);
-    connect(cancelBtn,  &QPushButton::clicked,
-            this, &QDialog::reject);
-
-    // Initial calculation
-    onPaymentMethodChanged();
-    calculateChange();
+    // Default to Cash ticked (the common case).
+    cashCheck->setChecked(true);
 }
 
-void PaymentDialog::onPaymentMethodChanged()
+void PaymentDialog::onMethodToggled() { recompute(); }   // (wiring done via lambdas)
+
+void PaymentDialog::recompute()
 {
-    int selectedId = paymentMethodGroup->checkedId();
+    amountPaid = enteredMajor();
+    const double due = dueMajor();
+    change = amountPaid - due;
 
-    switch (selectedId) {
-    case 0: // Cash
-        paymentMethod = "Cash";
-        amountPaidSpin->setEnabled(true);
-        amountPaidSpin->setValue(total);
-        break;
-    case 1: // Card
-        paymentMethod = "Card";
-        amountPaidSpin->setEnabled(false);
-        amountPaidSpin->setValue(total);
-        break;
-    case 2: // Mobile Money
-        paymentMethod = "Mobile Money";
-        amountPaidSpin->setEnabled(false);
-        amountPaidSpin->setValue(total);
-        break;
-    case 3: // Multiple
-        paymentMethod = "Multiple";
-        amountPaidSpin->setEnabled(true);
-        amountPaidSpin->setValue(total);
-        break;
-    }
+    totalLabel->setText("Amount Due: " + formatMoney(Money::fromMajor(due)));
+    paidLabel->setText("Entered: " + formatMoney(Money::fromMajor(amountPaid)));
 
-    // Reference field — method-specific. Cleared on every switch so a card ref
-    // can't linger as an "M-Pesa code".
-    const bool needRef = (selectedId != 0);
-    referenceEdit->clear();
-    referenceTitleLabel->setVisible(needRef);
-    referenceEdit->setVisible(needRef);
-
-    if (selectedId == 2) {            // Mobile Money (M-Pesa)
-        referenceTitleLabel->setText("M-Pesa Code: *");
-        referenceEdit->setPlaceholderText("10-char code, e.g. SLJ7X8K2P0");
-        referenceEdit->setValidator(m_mpesaValidator);
-        referenceEdit->setFocus();
-    } else if (selectedId == 1) {     // Card
-        referenceTitleLabel->setText("Card Ref:");
-        referenceEdit->setPlaceholderText("Card transaction reference (optional)");
-        referenceEdit->setValidator(nullptr);
-    } else if (selectedId == 3) {     // Multiple
-        referenceTitleLabel->setText("Reference:");
-        referenceEdit->setPlaceholderText("Reference (optional)");
-        referenceEdit->setValidator(nullptr);
-    }
-
-    // "Change" is only meaningful when the tendered amount can differ from the
-    // total — cash or a split. Card/M-Pesa are charged the exact total, so the
-    // perpetual "Change: 0.00" is just noise there.
-    changeLabel->setVisible(selectedId == 0 || selectedId == 3);
-
-    // M-Pesa STK push controls only in Mobile Money mode.
-    const bool mobile = (selectedId == 2);
-    m_phoneEdit->setVisible(mobile);
-    m_stkButton->setVisible(mobile);
-    if (!mobile) {
-        m_stkStatus->hide();
+    if (amountPaid + kEps < due) {
+        setStyleProperty(changeLabel, "kind", "danger");
+        changeLabel->setText("Remaining: " + formatMoney(Money::fromMajor(due - amountPaid)));
     } else {
-        m_phoneEdit->setEnabled(true);
+        setStyleProperty(changeLabel, "kind", "success");
+        changeLabel->setText("Change: " + formatMoney(Money::fromMajor(std::max(0.0, change))));
+    }
+
+    // M-Pesa STK availability (licensed tills only).
+    if (m_stkButton) {
         const bool avail = MpesaClient::isAvailable();
-        m_stkButton->setEnabled(avail);
+        m_stkButton->setEnabled(avail && mpesaCheck->isChecked());
         m_stkButton->setToolTip(avail ? QString()
             : "Activate this till's licence to trigger M-Pesa prompts — "
               "you can still type the code manually.");
-        if (m_hasCustomer && !m_customer.phone.isEmpty() && m_phoneEdit->text().isEmpty())
-            m_phoneEdit->setText(m_customer.phone);
     }
 
-    calculateChange();
-}
-
-void PaymentDialog::onAmountPaidChanged()
-{
-    calculateChange();
-}
-
-void PaymentDialog::calculateChange()
-{
-    amountPaid = amountPaidSpin->value();
-
-    // Round BOTH operands to cents before subtracting so that values that
-    // display identically (e.g. 2029.66) are treated as identical.
-    double paidCents  = std::round(amountPaid * 100.0) / 100.0;
-    double totalCents = std::round(total      * 100.0) / 100.0;
-
-    change = std::round((paidCents - totalCents) * 100.0) / 100.0;
-
-    if (change < 0) {
-        changeLabel->setText(
-            QString("Change: %1  Insufficient").arg(formatMoney(Money::fromMajor(change))));
-        setStyleProperty(changeLabel, "kind", "danger");
-    } else {
-        changeLabel->setText("Change: " + formatMoney(Money::fromMajor(change)));
-        setStyleProperty(changeLabel, "kind", "success");
-    }
-
-    // Under-payment can never be confirmed
-    confirmBtn->setEnabled(change >= 0);
-}
-
-void PaymentDialog::onConfirmClicked()
-{
-    calculateChange();
-
-    if (change < 0)
-        return; // button is disabled in this state; belt-and-braces
-
-    if (paymentMethod == "Mobile Money") {
-        const QString code = referenceEdit->text().trimmed().toUpper();
-        if (!kMpesaCode.match(code).hasMatch()) {
-            QMessageBox::warning(this, "M-Pesa Code Required",
-                code.isEmpty()
-                    ? "Enter the 10-character M-Pesa confirmation code from the "
-                      "customer's payment SMS (e.g. SLJ7X8K2P0)."
-                    : "That doesn't look like an M-Pesa code — it should be 10 "
-                      "letters/numbers (e.g. SLJ7X8K2P0).");
-            referenceEdit->setFocus();
-            return;
-        }
-        referenceEdit->setText(code);   // persist the normalized (upper-case) code
-    }
-
-    accept();
+    confirmBtn->setEnabled(amountPaid + kEps >= due);
 }
 
 void PaymentDialog::onStkPushClicked()
@@ -416,13 +326,51 @@ void PaymentDialog::onStkPushClicked()
         m_phoneEdit->setFocus();
         return;
     }
+    if (mpesaAmount->value() < 1.0) {
+        setStyleProperty(m_stkStatus, "kind", "danger");
+        m_stkStatus->setText("Enter the M-Pesa amount (at least KSh 1) first.");
+        m_stkStatus->show();
+        return;
+    }
     m_stkButton->setEnabled(false);
     m_phoneEdit->setEnabled(false);
     m_stkStatus->show();
-    // total is the outstanding amount (already reduced by any store credit /
-    // loyalty applied above). M-Pesa is charged whole shillings.
     m_mpesa->requestPayment(m_phoneEdit->text().trimmed(),
-                            Money::fromMajor(total), "POS");
+                            Money::fromMajor(mpesaAmount->value()), "POS");
+}
+
+void PaymentDialog::onConfirmClicked()
+{
+    const double due = dueMajor();
+    const double entered = enteredMajor();
+
+    if (entered + kEps < due) {
+        QMessageBox::warning(this, "Insufficient Payment",
+            QString("Entered %1 but %2 is due.")
+                .arg(formatMoney(Money::fromMajor(entered)),
+                     formatMoney(Money::fromMajor(due))));
+        return;
+    }
+    // Need at least one tender unless the whole bill was cleared by credit/points.
+    if (entered < kEps && due > kEps) {
+        QMessageBox::warning(this, "No Payment Method",
+                             "Tick a payment method and enter an amount.");
+        return;
+    }
+    // M-Pesa portion requires a valid confirmation code.
+    if (mpesaCheck->isChecked() && mpesaAmount->value() > kEps) {
+        const QString code = referenceEdit->text().trimmed().toUpper();
+        if (!kMpesaCode.match(code).hasMatch()) {
+            QMessageBox::warning(this, "M-Pesa Code Required",
+                code.isEmpty()
+                    ? "Enter the 10-character M-Pesa code (or use Send STK Prompt)."
+                    : "That doesn't look like an M-Pesa code — 10 letters/numbers.");
+            referenceEdit->setFocus();
+            return;
+        }
+        referenceEdit->setText(code);
+    }
+    accept();
 }
 
 void PaymentDialog::setCustomer(const Customer &customer)
@@ -432,37 +380,57 @@ void PaymentDialog::setCustomer(const Customer &customer)
     if (!m_hasCustomer) return;
 
     if (customer.loyaltyPoints > 0) {
-        loyaltyLabel->setText(
-            QString("Customer: %1  |  Loyalty Points: %2 (worth %3)")
-                .arg(customer.name)
-                .arg(customer.loyaltyPoints)
-                .arg(formatMoney(Money::fromCents(
-                    static_cast<qint64>(customer.loyaltyPoints) * m_loyaltyCentsPerPt))));
+        loyaltyLabel->setText(QString("Customer: %1  |  Loyalty Points: %2 (worth %3)")
+            .arg(customer.name).arg(customer.loyaltyPoints)
+            .arg(formatMoney(Money::fromCents(
+                static_cast<qint64>(customer.loyaltyPoints) * m_loyaltyCentsPerPt))));
         loyaltyLabel->show();
         redeemPointsButton->show();
         redeemPointsButton->setEnabled(true);
     }
-
     if (!customer.storeCredit.isZero()) {
-        creditAvailableLabel->setText(
-            QString("Customer: %1  |  Store Credit Available: %2")
-                .arg(customer.name, formatMoney(customer.storeCredit)));
+        creditAvailableLabel->setText(QString("Customer: %1  |  Store Credit Available: %2")
+            .arg(customer.name, formatMoney(customer.storeCredit)));
         creditAvailableLabel->show();
         applyCreditButton->show();
         applyCreditButton->setEnabled(true);
     }
+    // Prefill the M-Pesa phone from the customer record.
+    if (!customer.phone.isEmpty())
+        m_phoneEdit->setText(customer.phone);
 }
 
 void PaymentDialog::setLoyaltyCentsPerPoint(int centsPerPoint)
 {
-    if (centsPerPoint > 0)
-        m_loyaltyCentsPerPt = centsPerPoint;
+    if (centsPerPoint > 0) m_loyaltyCentsPerPt = centsPerPoint;
 }
 
-QString PaymentDialog::getPaymentMethod()   const { return paymentMethod; }
-Money   PaymentDialog::getAmountPaid()      const { return Money::fromMajor(amountPaid); }
-Money   PaymentDialog::getChange()          const { return Money::fromMajor(change);     }
-Money   PaymentDialog::getStoreCreditUsed()       const { return m_storeCreditUsed; }
-int     PaymentDialog::getCustomerId()            const { return m_hasCustomer ? m_customer.id : 0; }
-int     PaymentDialog::getLoyaltyPointsRedeemed() const { return m_pointsRedeemed; }
-QString PaymentDialog::getReferenceNumber()       const { return referenceEdit->text().trimmed(); }
+QString PaymentDialog::getPaymentMethod() const
+{
+    QStringList parts;
+    if (cashCheck->isChecked()  && cashAmount->value()  > kEps) parts << "Cash";
+    if (cardCheck->isChecked()  && cardAmount->value()  > kEps) parts << "Card";
+    if (mpesaCheck->isChecked() && mpesaAmount->value() > kEps) parts << "Mobile Money";
+    if (parts.isEmpty())
+        return m_storeCreditUsed.isZero() ? QStringLiteral("Cash") : QStringLiteral("Store Credit");
+    return parts.join(" + ");
+}
+
+Money   PaymentDialog::getAmountPaid()  const { return Money::fromMajor(enteredMajor()); }
+Money   PaymentDialog::getChange()      const { return Money::fromMajor(std::max(0.0, enteredMajor() - dueMajor())); }
+
+QString PaymentDialog::getReferenceNumber() const
+{
+    QStringList parts;
+    if (mpesaCheck->isChecked() && mpesaAmount->value() > kEps
+        && !referenceEdit->text().trimmed().isEmpty())
+        parts << "M-Pesa " + referenceEdit->text().trimmed();
+    if (cardCheck->isChecked() && cardAmount->value() > kEps
+        && !cardRef->text().trimmed().isEmpty())
+        parts << "Card " + cardRef->text().trimmed();
+    return parts.join("; ");
+}
+
+Money PaymentDialog::getStoreCreditUsed()       const { return m_storeCreditUsed; }
+int   PaymentDialog::getCustomerId()            const { return m_hasCustomer ? m_customer.id : 0; }
+int   PaymentDialog::getLoyaltyPointsRedeemed() const { return m_pointsRedeemed; }

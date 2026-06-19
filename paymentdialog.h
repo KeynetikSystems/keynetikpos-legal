@@ -1,18 +1,21 @@
 // =============================================================================
 // paymentdialog.h — PaymentDialog: the "take payment" step of checkout
 // -----------------------------------------------------------------------------
-// WHAT: Modal dialog to choose Cash / Card / Mobile / Multiple, enter the
-//       amount tendered (validated QDoubleSpinBox — no free-text parsing),
-//       capture a transaction reference for non-cash methods, and see change
-//       due live.
-// HOW:  Radio buttons in a QButtonGroup; calculateChange() re-runs on every
-//       amount change and Confirm is disabled while amountPaid < total.
-//       Mobile Money additionally requires a non-empty reference (M-Pesa
-//       always issues a code). Results are exposed via getters that
-//       MainWindow::onCheckout() reads after exec() returns Accepted.
-// WHY:  Computing change in the dialog — before the sale is recorded —
-//       prevents a half-recorded sale when the cashier mistypes; the sale only
-//       hits the database after payment details are confirmed.
+// WHAT: Modal dialog to settle a sale with ONE OR MORE tenders. Each method
+//       (Cash / Card / Mobile Money) is a checkbox; ticking it reveals a detail
+//       panel with that method's amount and any extra fields (M-Pesa phone +
+//       STK push, card reference). A live summary shows amount entered vs. the
+//       outstanding total, with the remaining balance or change. Store credit
+//       and loyalty points (if a customer is attached) reduce the total first.
+// HOW:  recompute() sums the active panels' amounts on every change; Confirm is
+//       enabled only once the entered total covers the due amount and each
+//       active method passes its own validation (e.g. an M-Pesa code present).
+//       Results are exposed via getters MainWindow::onCheckout() reads after
+//       exec() returns Accepted; a split tender is reported as a combined
+//       method string ("Cash + M-Pesa") with the entered total and change.
+// WHY:  Real tills routinely split a bill across cash + M-Pesa; modelling each
+//       tender explicitly (rather than one amount + one method) makes change,
+//       references and the M-Pesa STK amount correct per method.
 // =============================================================================
 #ifndef PAYMENTDIALOG_H
 #define PAYMENTDIALOG_H
@@ -22,8 +25,8 @@
 #include <QLineEdit>
 #include <QDoubleSpinBox>
 #include <QPushButton>
-#include <QRadioButton>
-#include <QButtonGroup>
+#include <QCheckBox>
+#include <QGroupBox>
 
 #include "money.h"
 #include "database.h"   // Customer
@@ -39,74 +42,76 @@ public:
     explicit PaymentDialog(Money totalAmount, QWidget *parent = nullptr);
     ~PaymentDialog();
 
-    // Optionally attach a customer before exec() — shows their store credit
-    // balance and lets the cashier apply it against the total.
+    // Optionally attach a customer before exec() — shows store credit / loyalty
+    // and lets the cashier apply them against the total.
     void setCustomer(const Customer &customer);
-    // Pass the configurable redemption rate (cents per point) before exec().
-    // Defaults to 10 (= KSh 0.10 per point).
     void setLoyaltyCentsPerPoint(int centsPerPoint);
 
-    QString getPaymentMethod() const;
-    Money getAmountPaid() const;
-    Money getChange() const;
-    QString getReferenceNumber() const;
-    // Non-zero only when the cashier chose to apply store credit.
-    Money getStoreCreditUsed() const;
-    int   getCustomerId() const;
-    // Points burned via "Redeem Points" this checkout (0 if not used).
-    int   getLoyaltyPointsRedeemed() const;
+    QString getPaymentMethod() const;     // "Cash", "Mobile Money", "Cash + Card", …
+    Money   getAmountPaid() const;        // total entered across all tenders
+    Money   getChange() const;            // entered - due (cash overpay), else 0
+    QString getReferenceNumber() const;   // combined method references (M-Pesa code, …)
+    Money   getStoreCreditUsed() const;
+    int     getCustomerId() const;
+    int     getLoyaltyPointsRedeemed() const;
 
 private slots:
-    void onPaymentMethodChanged();
-    void onAmountPaidChanged();
+    void recompute();             // re-sum tenders, refresh summary + Confirm state
+    void onMethodToggled();       // show/hide a method panel, prefill its amount
     void onConfirmClicked();
-    void onStkPushClicked();   // trigger an M-Pesa STK push to the customer's phone
+    void onStkPushClicked();      // M-Pesa STK push for the M-Pesa portion
 
 private:
-    void setupUI();
-    void calculateChange();
+    void   setupUI();
+    double dueMajor() const;      // outstanding total (after credit/loyalty)
+    double enteredMajor() const;  // sum of active tenders
 
-    // UI Components
-    QLabel *totalLabel;
-    QButtonGroup *paymentMethodGroup;
-    QRadioButton *cashRadio;
-    QRadioButton *cardRadio;
-    QRadioButton *mobileRadio;
-    QRadioButton *multipleRadio;
-    QDoubleSpinBox *amountPaidSpin;
-    QLabel *referenceTitleLabel;
-    QLineEdit *referenceEdit;
-    QRegularExpressionValidator *m_mpesaValidator { nullptr };  // [A-Za-z0-9]{0,10}
-    QLabel *changeLabel;
+    // ── Method selection ────────────────────────────────────────────────────
+    QCheckBox *cashCheck   { nullptr };
+    QCheckBox *cardCheck   { nullptr };
+    QCheckBox *mpesaCheck  { nullptr };
 
-    // M-Pesa STK push (shown only in Mobile Money mode)
-    QLineEdit   *m_phoneEdit  { nullptr };
-    QPushButton *m_stkButton  { nullptr };
-    QLabel      *m_stkStatus  { nullptr };
-    MpesaClient *m_mpesa      { nullptr };
-    QPushButton *confirmBtn;
-    QPushButton *cancelBtn;
+    // ── Per-method detail panels (hidden until the method is ticked) ──────────
+    QGroupBox      *cashBox     { nullptr };
+    QDoubleSpinBox *cashAmount  { nullptr };
 
-    // Data
-    double total;
-    double amountPaid;
-    double change;
-    QString paymentMethod;
+    QGroupBox      *cardBox     { nullptr };
+    QDoubleSpinBox *cardAmount  { nullptr };
+    QLineEdit      *cardRef     { nullptr };
 
-    // Customer store-credit widgets (hidden when no customer is set)
-    QLabel       *creditAvailableLabel { nullptr };
-    QPushButton  *applyCreditButton    { nullptr };
+    QGroupBox      *mpesaBox    { nullptr };
+    QDoubleSpinBox *mpesaAmount { nullptr };
+    QLineEdit      *m_phoneEdit { nullptr };
+    QPushButton    *m_stkButton { nullptr };
+    QLabel         *m_stkStatus { nullptr };
+    QLineEdit      *referenceEdit { nullptr };   // M-Pesa confirmation code
+    QRegularExpressionValidator *m_mpesaValidator { nullptr };
+    MpesaClient    *m_mpesa     { nullptr };
 
-    // Loyalty redemption widgets (hidden when no customer / no points)
-    QLabel       *loyaltyLabel         { nullptr };
-    QPushButton  *redeemPointsButton   { nullptr };
+    // ── Summary + actions ─────────────────────────────────────────────────────
+    QLabel      *totalLabel  { nullptr };
+    QLabel      *paidLabel   { nullptr };
+    QLabel      *changeLabel { nullptr };
+    QPushButton *confirmBtn  { nullptr };
+    QPushButton *cancelBtn   { nullptr };
 
-    // Customer state
-    Customer  m_customer;
-    bool      m_hasCustomer        { false };
-    Money     m_storeCreditUsed;
-    int       m_pointsRedeemed     { 0 };   // points burned this checkout
-    int       m_loyaltyCentsPerPt  { 10 };  // configurable redemption rate
+    // ── Amounts (major units) ─────────────────────────────────────────────────
+    double total;        // outstanding due, after store credit / loyalty
+    double amountPaid;   // entered sum (computed in recompute())
+    double change;       // entered - due (computed)
+
+    // ── Customer store-credit widgets (hidden when no customer) ───────────────
+    QLabel      *creditAvailableLabel { nullptr };
+    QPushButton *applyCreditButton    { nullptr };
+    QLabel      *loyaltyLabel         { nullptr };
+    QPushButton *redeemPointsButton   { nullptr };
+
+    // ── Customer state ────────────────────────────────────────────────────────
+    Customer m_customer;
+    bool     m_hasCustomer       { false };
+    Money    m_storeCreditUsed;
+    int      m_pointsRedeemed    { 0 };
+    int      m_loyaltyCentsPerPt { 10 };
 };
 
 #endif // PAYMENTDIALOG_H
