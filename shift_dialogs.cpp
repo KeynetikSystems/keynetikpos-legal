@@ -31,7 +31,9 @@ OpenShiftDialog::OpenShiftDialog(QWidget *parent)
     : QDialog(parent)
 {
     setWindowTitle("Open Shift");
-    setFixedSize(380, 260);
+    // A fixed size smaller than the themed content forces row overlap; pin the
+    // width but let the height follow the layout.
+    setMinimumWidth(400);
 
     auto *layout = new QVBoxLayout(this);
     layout->setContentsMargins(20, 20, 20, 20);

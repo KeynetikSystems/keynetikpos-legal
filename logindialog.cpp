@@ -26,8 +26,11 @@ LoginDialog::LoginDialog(QWidget *parent)
     setupUI();
     setWindowTitle("KEYNETIK POS - Login");
     setModal(true);
-    resize(400, 320);
-    setMinimumSize(360, 280);
+    // Let the layout determine the height. A hard-coded size smaller than the
+    // content's natural minimum forces Qt to overlap rows (the username/password
+    // fields collided into each other once themed padding/fonts grew them).
+    setMinimumWidth(420);
+    adjustSize();
 }
 
 void LoginDialog::setupUI() {
