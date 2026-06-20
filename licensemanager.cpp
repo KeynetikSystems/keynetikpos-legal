@@ -158,7 +158,8 @@ static QStringList featuresForTier(int tier) {
           << Feature::PL_REPORT << Feature::STOCK_VALUATION;
     }
     if (tier >= 4) {
-        f << Feature::MULTI_BRANCH << Feature::PAYROLL << Feature::VAT_MODULE;
+        f << Feature::GENERAL_LEDGER << Feature::MULTI_BRANCH
+          << Feature::PAYROLL << Feature::VAT_MODULE;
     }
     return f;
 }

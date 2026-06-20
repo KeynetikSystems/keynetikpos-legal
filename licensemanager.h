@@ -57,7 +57,8 @@ namespace Feature {
     inline constexpr const char *CUSTOMERS        = "customers";
     inline constexpr const char *PL_REPORT        = "pl_report";
     inline constexpr const char *STOCK_VALUATION  = "stock_valuation";
-    // Tier 4 (reserved — not yet implemented)
+    // Tier 4 (ERP Full)
+    inline constexpr const char *GENERAL_LEDGER   = "general_ledger";
     inline constexpr const char *MULTI_BRANCH     = "multi_branch";
     inline constexpr const char *PAYROLL          = "payroll";
     inline constexpr const char *VAT_MODULE       = "vat_module";

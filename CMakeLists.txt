@@ -52,6 +52,8 @@ set(PROJECT_SOURCES
     cartmodel.cpp cartmodel.h
     productgridmodel.cpp productgridmodel.h
     checkoutservice.cpp checkoutservice.h
+    ledger.cpp ledger.h
+    ledgerdialog.cpp ledgerdialog.h
     carttotals.cpp carttotals.h
     providersetup.cpp providersetup.h
     appstyle.cpp appstyle.h
@@ -291,4 +293,19 @@ if(KEYNETIK_BUILD_TESTS)
         Qt${QT_VERSION_MAJOR}::Test
     )
     add_test(NAME database_test COMMAND database_test)
+
+    # General-ledger double-entry invariants (in-memory SQLite, no UI).
+    add_executable(ledger_test
+        tests/ledger_test.cpp
+        ledger.cpp ledger.h
+    )
+    set_target_properties(ledger_test PROPERTIES AUTOMOC ON)
+    target_include_directories(ledger_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+    target_compile_options(ledger_test PRIVATE ${KEYNETIK_WARNINGS})
+    target_link_libraries(ledger_test PRIVATE
+        Qt${QT_VERSION_MAJOR}::Core
+        Qt${QT_VERSION_MAJOR}::Sql
+        Qt${QT_VERSION_MAJOR}::Test
+    )
+    add_test(NAME ledger_test COMMAND ledger_test)
 endif()

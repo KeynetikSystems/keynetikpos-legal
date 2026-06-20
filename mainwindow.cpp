@@ -50,6 +50,8 @@
 #include "cartservice.h"
 #include "cartmodel.h"
 #include "checkoutservice.h"
+#include "ledger.h"
+#include "ledgerdialog.h"
 #include "providersetup.h"
 #include "appstyle.h"
 #include "productgridmodel.h"
@@ -567,6 +569,15 @@ void MainWindow::setupMenuBar()
             &QAction::triggered, this, [this]() {
         if (!checkLicenseTier(this, 3, "Customer Accounts")) return;
         CustomerDialog dlg(this);
+        dlg.exec();
+    });
+    financeMenu->addSeparator();
+    connect(financeMenu->addAction("General Ledger..."),
+            &QAction::triggered, this, [this]() {
+        if (!checkLicenseTier(this, 4, "General Ledger")) return;
+        Ledger ledger(QSqlDatabase::database());
+        ledger.initSchema();
+        LedgerDialog dlg(&ledger, this);
         dlg.exec();
     });
 
