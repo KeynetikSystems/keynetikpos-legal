@@ -56,6 +56,9 @@ set(PROJECT_SOURCES
     ledgerdialog.cpp ledgerdialog.h
     payroll.cpp payroll.h
     payrolldialog.cpp payrolldialog.h
+    vat.cpp vat.h
+    vatdialog.cpp vatdialog.h
+    etims.cpp etims.h
     carttotals.cpp carttotals.h
     providersetup.cpp providersetup.h
     appstyle.cpp appstyle.h
@@ -326,4 +329,20 @@ if(KEYNETIK_BUILD_TESTS)
         Qt${QT_VERSION_MAJOR}::Test
     )
     add_test(NAME payroll_test COMMAND payroll_test)
+
+    # VAT engine + VAT-3 aggregation (in-memory SQLite; links ledger.cpp).
+    add_executable(vat_test
+        tests/vat_test.cpp
+        vat.cpp vat.h
+        ledger.cpp ledger.h
+    )
+    set_target_properties(vat_test PROPERTIES AUTOMOC ON)
+    target_include_directories(vat_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+    target_compile_options(vat_test PRIVATE ${KEYNETIK_WARNINGS})
+    target_link_libraries(vat_test PRIVATE
+        Qt${QT_VERSION_MAJOR}::Core
+        Qt${QT_VERSION_MAJOR}::Sql
+        Qt${QT_VERSION_MAJOR}::Test
+    )
+    add_test(NAME vat_test COMMAND vat_test)
 endif()

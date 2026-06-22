@@ -54,6 +54,8 @@
 #include "ledgerdialog.h"
 #include "payrolldialog.h"
 #include "payroll.h"
+#include "vatdialog.h"
+#include "vat.h"
 #include "providersetup.h"
 #include "appstyle.h"
 #include "productgridmodel.h"
@@ -588,6 +590,14 @@ void MainWindow::setupMenuBar()
         Payroll payroll(QSqlDatabase::database());
         payroll.initSchema();
         PayrollDialog dlg(&payroll, this);
+        dlg.exec();
+    });
+    connect(financeMenu->addAction("VAT..."),
+            &QAction::triggered, this, [this]() {
+        if (!checkLicenseTier(this, 4, "VAT")) return;
+        Vat vat(QSqlDatabase::database());
+        vat.initSchema();
+        VatDialog dlg(&vat, this);
         dlg.exec();
     });
 
