@@ -82,6 +82,42 @@ private slots:
         QCOMPARE(saleTenderAccount("Bank Transfer"), QString("1020"));
         QCOMPARE(saleTenderAccount("Gift Voucher"),  QString("1000"));  // fallback
     }
+
+    void purchase_splitsVatToInput()
+    {
+        // Total 5,800 incl, input VAT 800 -> Inventory 5,000 net.
+        const auto ls = buildPurchaseJournal(Money::fromCents(580000), Money::fromCents(80000));
+        assertBalanced(ls);
+        QCOMPARE(dr(ls, "1200"), qint64(500000));   // inventory net
+        QCOMPARE(dr(ls, "1300"), qint64(80000));    // recoverable VAT
+        QCOMPARE(cr(ls, "2000"), qint64(580000));   // accounts payable (gross)
+    }
+
+    void purchase_noVatOmitsInputLine()
+    {
+        const auto ls = buildPurchaseJournal(Money::fromCents(580000), Money());
+        assertBalanced(ls);
+        QCOMPARE(dr(ls, "1200"), qint64(580000));
+        QCOMPARE(dr(ls, "1300"), qint64(0));
+        QCOMPARE(cr(ls, "2000"), qint64(580000));
+    }
+
+    void expense_debitsCategoryCreditsCash()
+    {
+        const auto ls = buildExpenseJournal("Rent", Money::fromCents(3000000));
+        assertBalanced(ls);
+        QCOMPARE(dr(ls, "6100"), qint64(3000000));  // Rent account
+        QCOMPARE(cr(ls, "1000"), qint64(3000000));  // cash out
+    }
+
+    void expenseAccountMapping()
+    {
+        QCOMPARE(expenseAccount("Rent"),           QString("6100"));
+        QCOMPARE(expenseAccount("Electricity"),    QString("6200"));
+        QCOMPARE(expenseAccount("Water Bill"),     QString("6200"));
+        QCOMPARE(expenseAccount("Salaries"),       QString("6000"));
+        QCOMPARE(expenseAccount("Office Supplies"),QString("6300"));  // fallback
+    }
 };
 
 QTEST_APPLESS_MAIN(SaleJournalTest)

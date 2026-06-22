@@ -5,10 +5,16 @@
 #include "purchaseorderdialog.h"
 #include "usermanager.h"
 #include "money.h"
+#include "database.h"
+#include "ledger.h"
+#include "salejournal.h"
+#include "vat.h"
 #include <QHeaderView>
 #include <QFormLayout>
 #include <QMessageBox>
 #include <QGroupBox>
+#include <QSqlDatabase>
+#include <QDate>
 
 // ─────────────────────────────────────────────────────────────────────────────
 // NewPurchaseOrderDialog
@@ -322,6 +328,28 @@ void PurchaseOrderDialog::onReceiveClicked()
             "Failed to receive purchase order: " + Database::instance().getLastError());
         return;
     }
+    // Auto-post the received goods to the General Ledger:
+    // Dr Inventory (net) + Dr VAT Input / Cr Accounts Payable. Best-effort —
+    // a ledger hiccup must not undo the stock receipt that already committed.
+    {
+        Vat vat(QSqlDatabase::database());
+        vat.initSchema();
+        const Money inputVat = vat.purchaseOrderInputVat(id);
+        const PurchaseOrder po = Database::instance().getPurchaseOrderById(id);
+        const QVector<GLLine> lines = buildPurchaseJournal(po.total, inputVat);
+        if (!lines.isEmpty()) {
+            Ledger ledger(QSqlDatabase::database());
+            ledger.initSchema();
+            if (ledger.postEntry(QDate::currentDate(),
+                                 QString("Purchase Order #%1").arg(id),
+                                 "purchase", lines) < 0) {
+                UserManager::instance().logUserAction(
+                    "Ledger Posting Failed",
+                    QString("PO #%1 not posted to GL: %2").arg(id).arg(ledger.lastError()));
+            }
+        }
+    }
+
     QMessageBox::information(this, "Received", "Stock and cost prices updated.");
     loadOrders();
 }

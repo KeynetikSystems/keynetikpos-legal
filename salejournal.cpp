@@ -56,3 +56,43 @@ QVector<GLLine> buildSaleJournal(Money total, Money tax,
         lines.clear();
     return lines;
 }
+
+QVector<GLLine> buildPurchaseJournal(Money total, Money inputVat)
+{
+    QVector<GLLine> lines;
+    if (total.cents() <= 0) return lines;
+
+    const Money net = total - inputVat;
+    if (net.cents() > 0)
+        lines.append({ "1200", net, Money(), "Inventory received" });
+    if (inputVat.cents() > 0)
+        lines.append({ "1300", inputVat, Money(), "Input VAT (recoverable)" });
+    lines.append({ "2000", Money(), total, "Accounts payable" });
+
+    if (lines.size() < 2) lines.clear();
+    return lines;
+}
+
+QString expenseAccount(const QString &categoryName)
+{
+    const QString c = categoryName.toLower();
+    if (c.contains("rent"))
+        return "6100";   // Rent
+    if (c.contains("util") || c.contains("electric") || c.contains("water")
+        || c.contains("power") || c.contains("internet"))
+        return "6200";   // Utilities
+    if (c.contains("wage") || c.contains("salar") || c.contains("payroll")
+        || c.contains("staff"))
+        return "6000";   // Wages & Salaries
+    return "6300";       // Other Expenses
+}
+
+QVector<GLLine> buildExpenseJournal(const QString &categoryName, Money amount)
+{
+    QVector<GLLine> lines;
+    if (amount.cents() <= 0) return lines;
+    lines.append({ expenseAccount(categoryName), amount, Money(),
+                   categoryName.isEmpty() ? "Expense" : categoryName });
+    lines.append({ "1000", Money(), amount, "Cash paid" });
+    return lines;
+}

@@ -69,6 +69,11 @@ public:
     // ── VAT-3 ─────────────────────────────────────────────────────────────────
     Vat3 computeVat3(const QDate &from, const QDate &to) const;
 
+    // Recoverable input VAT on a single purchase order, summed across its line
+    // items by tax code (standard-rated items only). Used when posting a
+    // received PO to the GL so inventory is booked net of VAT.
+    Money purchaseOrderInputVat(int poId) const;
+
     // Records a VAT payment to KRA: Dr 2100 VAT Output / Cr <bankAccount>.
     // Returns the GL entry id, or -1. (The liability accrues as sales are
     // posted to the GL; this entry settles it.)

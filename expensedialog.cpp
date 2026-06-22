@@ -5,6 +5,9 @@
 #include "database.h"
 #include "usermanager.h"
 #include "money.h"
+#include "ledger.h"
+#include "salejournal.h"
+#include <QSqlDatabase>
 #include <QHeaderView>
 #include <QFormLayout>
 #include <QComboBox>
@@ -210,6 +213,25 @@ void ExpenseDialog::onAddExpenseClicked()
             "Failed to record expense: " + Database::instance().getLastError());
         return;
     }
+
+    // Auto-post to the General Ledger: Dr the expense account / Cr Cash.
+    // Best-effort — a ledger hiccup must not undo the recorded expense.
+    {
+        const QString category = catCombo->currentText();
+        const QVector<GLLine> lines = buildExpenseJournal(category, e.amount);
+        if (!lines.isEmpty()) {
+            Ledger ledger(QSqlDatabase::database());
+            ledger.initSchema();
+            const QDate when = QDate::fromString(e.date, "yyyy-MM-dd");
+            if (ledger.postEntry(when.isValid() ? when : QDate::currentDate(),
+                                 "Expense: " + category, "expense", lines) < 0) {
+                UserManager::instance().logUserAction(
+                    "Ledger Posting Failed",
+                    QString("Expense not posted to GL: %1").arg(ledger.lastError()));
+            }
+        }
+    }
+
     loadExpenses();
 }
 

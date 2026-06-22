@@ -180,6 +180,27 @@ Vat3 Vat::computeVat3(const QDate &from, const QDate &to) const
     return v;
 }
 
+Money Vat::purchaseOrderInputVat(int poId) const
+{
+    const double rate = standardRate();
+    Money vat;
+    QSqlQuery q(m_db);
+    q.prepare("SELECT COALESCE(p.tax_code, 'standard') AS code, SUM(poi.subtotal) "
+              "FROM purchase_order_items poi "
+              "LEFT JOIN products p ON p.id = poi.product_id "
+              "WHERE poi.po_id = ? GROUP BY code");
+    q.addBindValue(poId);
+    if (q.exec()) {
+        while (q.next()) {
+            const TaxCode code = taxCodeFromString(q.value(0).toString());
+            const Money gross = Money::fromCents(q.value(1).toLongLong());
+            if (code == TaxCode::Standard)
+                vat += splitInclusive(gross, code, rate).vat;
+        }
+    }
+    return vat;
+}
+
 int Vat::postSettlement(const QDate &date, Money amount, const QString &bankAccount)
 {
     if (amount.cents() <= 0) { m_lastError = "Nothing to settle."; return -1; }

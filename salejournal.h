@@ -1,17 +1,17 @@
 // =============================================================================
-// salejournal.h — Build the GL journal lines for a completed sale (Tier 4)
+// salejournal.h — Build GL journal lines for sales, purchases, expenses (Tier 4)
 // -----------------------------------------------------------------------------
-// WHAT: A pure function that turns a sale's totals + tenders into balanced
-//       double-entry journal lines, so every sale can post to the General
-//       Ledger automatically at checkout.
-// HOW:  Debit the money received (each tender to its account: cash 1000,
-//       M-Pesa 1010, card/bank 1020) plus any non-cash settlement (store
-//       credit / on-account) to Accounts Receivable 1100; credit Sales Revenue
-//       4000 (net of VAT) and VAT Output 2100. If cost of goods is known, add
-//       the matching Dr COGS 5000 / Cr Inventory 1200 pair. No DB, no UI — just
-//       maths over Money, so it is unit-tested in isolation.
-// WHY:  Keeps the ledger a complete record (sales were the missing piece) while
-//       keeping the account-mapping logic reviewable and pinned by tests.
+// WHAT: Pure functions that turn a sale / received purchase / expense into
+//       balanced double-entry journal lines, so every money movement can post
+//       to the General Ledger automatically.
+// HOW:  Sale — Dr money received per tender (cash 1000, M-Pesa 1010, card/bank
+//       1020) plus non-cash settlement to AR 1100; Cr Sales 4000 (net of VAT) +
+//       VAT Output 2100; plus the Dr COGS 5000 / Cr Inventory 1200 pair.
+//       Purchase — Dr Inventory 1200 (net) + VAT Input 1300 / Cr Accounts
+//       Payable 2000. Expense — Dr the expense account / Cr Cash 1000.
+//       No DB, no UI — just maths over Money, unit-tested in isolation.
+// WHY:  Keeps the ledger a complete record while keeping the account-mapping
+//       logic reviewable and pinned by tests.
 // =============================================================================
 #ifndef SALEJOURNAL_H
 #define SALEJOURNAL_H
@@ -39,5 +39,15 @@ QString saleTenderAccount(const QString &method);
 QVector<GLLine> buildSaleJournal(Money total, Money tax,
                                  const QVector<SaleTender> &tenders,
                                  Money storeCreditUsed, Money cogs);
+
+// Received purchase order (on credit): Dr Inventory 1200 (net = total - inputVat)
+// + Dr VAT Input 1300 (inputVat) / Cr Accounts Payable 2000 (total).
+QVector<GLLine> buildPurchaseJournal(Money total, Money inputVat);
+
+// Maps an expense category name to a GL expense account code.
+QString expenseAccount(const QString &categoryName);
+
+// Expense paid in cash: Dr <expense account> / Cr Cash 1000.
+QVector<GLLine> buildExpenseJournal(const QString &categoryName, Money amount);
 
 #endif // SALEJOURNAL_H
