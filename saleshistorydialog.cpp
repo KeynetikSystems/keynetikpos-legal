@@ -185,8 +185,8 @@ void SalesHistoryDialog::setupUI()
 
 void SalesHistoryDialog::loadSales()
 {
-    QString startDate = startDateEdit->date().toString("yyyy-MM-dd");
-    QString endDate = endDateEdit->date().toString("yyyy-MM-dd");
+    const QDate startDate = startDateEdit->date();
+    const QDate endDate   = endDateEdit->date();
 
     sales = Database::instance().getSalesByDateRange(startDate, endDate);
     updateSalesTable();
@@ -222,7 +222,7 @@ void SalesHistoryDialog::updateSalesTable()
         salesTable->setItem(row, 0, idItem);
 
         // Date & Time
-        salesTable->setItem(row, 1, new QTableWidgetItem(sale.saleDate));
+        salesTable->setItem(row, 1, new QTableWidgetItem(sale.saleDate.toString("yyyy-MM-dd HH:mm")));
 
         // Payment Method
         QTableWidgetItem *paymentItem = new QTableWidgetItem(sale.paymentMethod);
@@ -292,7 +292,7 @@ void SalesHistoryDialog::showSaleDetails(int saleId)
                       + QString("         SALE DETAILS\n")
                       + QString("═══════════════════════════════\n\n")
                       + QString("Sale ID: #%1\n").arg(sale.id)
-                      + QString("Date: %1\n").arg(sale.saleDate)
+                      + QString("Date: %1\n").arg(sale.saleDate.toString("yyyy-MM-dd HH:mm"))
                       + QString("Payment: %1\n\n").arg(sale.paymentMethod)
                       + QString("ITEMS PURCHASED:\n")
                       + QString("───────────────────────────────\n");
@@ -453,7 +453,7 @@ void SalesHistoryDialog::onExportClicked()
 
     for (const Sale &sale : sales) {
         out << sale.id << ","
-            << sale.saleDate << ","
+            << sale.saleDate.toString(Qt::ISODate) << ","
             << sale.paymentMethod << ","
             << sale.subtotal.toMajor() << ","
             << sale.tax.toMajor() << ","

@@ -150,8 +150,8 @@ void ReportsDialog::onGenerateReport()
 
 void ReportsDialog::generateSalesByDateReport()
 {
-    QString startDate = startDateEdit->date().toString("yyyy-MM-dd");
-    QString endDate = endDateEdit->date().toString("yyyy-MM-dd");
+    const QDate startDate = startDateEdit->date();
+    const QDate endDate   = endDateEdit->date();
 
     QVector<Sale> sales = Database::instance().getSalesByDateRange(startDate, endDate);
 
@@ -169,7 +169,7 @@ void ReportsDialog::generateSalesByDateReport()
         reportTable->insertRow(row);
 
         reportTable->setItem(row, 0, new QTableWidgetItem(QString::number(sale.id)));
-        reportTable->setItem(row, 1, new QTableWidgetItem(sale.saleDate));
+        reportTable->setItem(row, 1, new QTableWidgetItem(sale.saleDate.toString("yyyy-MM-dd HH:mm")));
         reportTable->setItem(row, 2, new QTableWidgetItem(money2(sale.subtotal)));
         reportTable->setItem(row, 3, new QTableWidgetItem(money2(sale.tax)));
         reportTable->setItem(row, 4, new QTableWidgetItem(money2(sale.discount)));
@@ -180,7 +180,7 @@ void ReportsDialog::generateSalesByDateReport()
         totalDiscount += sale.discount;
 
         QStringList rowData;
-        rowData << QString::number(sale.id) << sale.saleDate
+        rowData << QString::number(sale.id) << sale.saleDate.toString(Qt::ISODate)
                 << money2(sale.subtotal)
                 << money2(sale.tax)
                 << money2(sale.discount)
@@ -237,8 +237,8 @@ void ReportsDialog::generateSalesByCategoryReport()
 
 void ReportsDialog::generateSalesByPaymentReport()
 {
-    const QString startDate = startDateEdit->date().toString("yyyy-MM-dd");
-    const QString endDate   = endDateEdit->date().toString("yyyy-MM-dd");
+    const QDate startDate = startDateEdit->date();
+    const QDate endDate   = endDateEdit->date();
 
     // Per-tender breakdown (split sales counted by each method, not lumped under
     // a "Cash + M-Pesa" label); falls back to the sale's method for pre-upgrade
@@ -301,15 +301,15 @@ void ReportsDialog::generateTopSellingProductsReport()
 
 void ReportsDialog::generateDailySalesReport()
 {
-    QString startDate = startDateEdit->date().toString("yyyy-MM-dd");
-    QString endDate = endDateEdit->date().toString("yyyy-MM-dd");
+    const QDate startDate = startDateEdit->date();
+    const QDate endDate   = endDateEdit->date();
 
     QVector<Sale> sales = Database::instance().getSalesByDateRange(startDate, endDate);
     QMap<QString, Money> dailyTotals;
     QMap<QString, int> dailyCount;
 
     for (const Sale &sale : sales) {
-        QString date = sale.saleDate.left(10); // Extract date part
+        QString date = sale.saleDate.date().toString(Qt::ISODate); // group by day
         dailyTotals[date] += sale.total;
         dailyCount[date]++;
     }
@@ -349,8 +349,8 @@ void ReportsDialog::generateProfitLossReport()
             "Contact sales@keynetik.com to upgrade.");
         return;
     }
-    const QString start = startDateEdit->date().toString("yyyy-MM-dd");
-    const QString end   = endDateEdit->date().toString("yyyy-MM-dd");
+    const QDate start = startDateEdit->date();
+    const QDate end   = endDateEdit->date();
 
     const auto rows = Database::instance().getProfitLossByDateRange(start, end);
 

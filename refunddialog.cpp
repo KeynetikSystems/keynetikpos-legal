@@ -131,7 +131,7 @@ void RefundDialog::onLoadSale()
 
 void RefundDialog::populateSaleInfo(const Sale &sale)
 {
-    saleDateLabel->setText(sale.saleDate);
+    saleDateLabel->setText(sale.saleDate.toString("yyyy-MM-dd HH:mm"));
     saleTotalLabel->setText(currencySymbol() + " " +
         QString::number(sale.total.toMajor(), 'f', 2));
     paymentLabel->setText(sale.paymentMethod);

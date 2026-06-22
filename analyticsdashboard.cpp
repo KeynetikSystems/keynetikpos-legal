@@ -319,9 +319,7 @@ SalesMetrics AnalyticsDashboard::calculateMetrics()
         metrics.itemsSold = query.value("total_items").toInt();
 
     metrics.totalProfit =
-        Database::instance().getActualGrossProfit(
-            startDate.toString("yyyy-MM-dd"),
-            endDate.toString("yyyy-MM-dd"));
+        Database::instance().getActualGrossProfit(startDate.date(), endDate.date());
 
     return metrics;
 }

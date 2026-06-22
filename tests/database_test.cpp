@@ -55,6 +55,30 @@ private:
     }
     static Money m(qint64 cents) { return Money::fromCents(cents); }
 
+    // Builds a SaleRequest from the positional args the tests used before
+    // recordSale() took a struct — keeps the call sites compact.
+    static SaleRequest sale(const QVector<SaleItem> &items,
+                            Money subtotal, Money tax, Money discount, Money total,
+                            const QString &method, Money paid, Money change,
+                            int customerId = 0,
+                            Money credit = Money::fromCents(0),
+                            const QVector<SalePayment> &pays = {})
+    {
+        SaleRequest r;
+        r.items           = items;
+        r.subtotal        = subtotal;
+        r.tax             = tax;
+        r.discount        = discount;
+        r.total           = total;
+        r.paymentMethod   = method;
+        r.amountPaid      = paid;
+        r.changeDue       = change;
+        r.customerId      = customerId;
+        r.storeCreditUsed = credit;
+        r.payments        = pays;
+        return r;
+    }
+
 private slots:
     // Fresh in-memory DB for every test — no shared state, no AppData writes.
     void init()
@@ -73,8 +97,8 @@ private slots:
         const int pid = addProduct("REC1", m(10000), 10);
 
         QVector<SaleItem> items { line(pid, "Test REC1", 3, m(10000)) };
-        const int saleId = dbi().recordSale(items, m(30000), m(0), m(0), m(30000),
-                                            "Cash", m(30000), m(0));
+        const int saleId = dbi().recordSale(sale(items, m(30000), m(0), m(0), m(30000),
+                                            "Cash", m(30000), m(0)));
 
         QVERIFY(saleId > 0);
         QCOMPARE(dbi().getStock(pid), 7);                 // 10 - 3
@@ -85,7 +109,7 @@ private slots:
 
     void recordSale_emptyItemsRejected()
     {
-        const int saleId = dbi().recordSale({}, m(0), m(0), m(0), m(0), "Cash", m(0), m(0));
+        const int saleId = dbi().recordSale(sale({}, m(0), m(0), m(0), m(0), "Cash", m(0), m(0)));
         QCOMPARE(saleId, -1);
         QVERIFY(dbi().getAllSales().isEmpty());
     }
@@ -98,12 +122,12 @@ private slots:
             { "Cash",         m(4000), QString() },
             { "Mobile Money", m(6000), "SLJ7X8K2P0" },
         };
-        const int saleId = dbi().recordSale(items, m(10000), m(0), m(0), m(10000),
+        const int saleId = dbi().recordSale(sale(items, m(10000), m(0), m(0), m(10000),
                                             "Cash + Mobile Money", m(10000), m(0),
-                                            0, m(0), pays);
+                                            0, m(0), pays));
         QVERIFY(saleId > 0);
 
-        const QString today = QDate::currentDate().toString("yyyy-MM-dd");
+        const QDate today = QDate::currentDate();
         const auto totals = dbi().getPaymentTotalsByMethod(today, today);
 
         qint64 cash = -1, mpesa = -1;
@@ -126,7 +150,7 @@ private slots:
             line(p1, "Test OK1",  5,  m(5000)),
             line(p2, "Test LOW1", 9999, m(5000)),
         };
-        const int saleId = dbi().recordSale(items, m(0), m(0), m(0), m(0), "Cash", m(0), m(0));
+        const int saleId = dbi().recordSale(sale(items, m(0), m(0), m(0), m(0), "Cash", m(0), m(0)));
 
         QCOMPARE(saleId, -1);
         QVERIFY(dbi().getAllSales().isEmpty());
@@ -138,8 +162,8 @@ private slots:
     {
         const int pid = addProduct("REF1", m(8000), 10);
         QVector<SaleItem> items { line(pid, "Test REF1", 4, m(8000)) };
-        const int saleId = dbi().recordSale(items, m(32000), m(0), m(0), m(32000),
-                                            "Cash", m(32000), m(0));
+        const int saleId = dbi().recordSale(sale(items, m(32000), m(0), m(0), m(32000),
+                                            "Cash", m(32000), m(0)));
         QVERIFY(saleId > 0);
         QCOMPARE(dbi().getStock(pid), 6);
 
@@ -153,8 +177,8 @@ private slots:
     {
         const int pid = addProduct("REF2", m(8000), 10);
         QVector<SaleItem> items { line(pid, "Test REF2", 4, m(8000)) };
-        const int saleId = dbi().recordSale(items, m(32000), m(0), m(0), m(32000),
-                                            "Cash", m(32000), m(0));
+        const int saleId = dbi().recordSale(sale(items, m(32000), m(0), m(0), m(32000),
+                                            "Cash", m(32000), m(0)));
         QVERIFY(saleId > 0);
 
         QVERIFY(dbi().processRefund(saleId, "first", "tester"));

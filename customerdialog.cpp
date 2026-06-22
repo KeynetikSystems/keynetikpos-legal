@@ -189,7 +189,7 @@ void CustomerDialog::showCustomerDetail(int customerId)
     historyTable->setRowCount(history.size());
     for (int row = 0; row < history.size(); ++row) {
         const Sale &s = history[row];
-        historyTable->setItem(row, 0, new QTableWidgetItem(s.saleDate.left(10)));
+        historyTable->setItem(row, 0, new QTableWidgetItem(s.saleDate.toString("yyyy-MM-dd")));
         historyTable->setItem(row, 1, new QTableWidgetItem(formatMoney(s.total)));
         historyTable->setItem(row, 2, new QTableWidgetItem(s.paymentMethod));
         historyTable->setItem(row, 3, new QTableWidgetItem(QString("#%1").arg(s.id)));

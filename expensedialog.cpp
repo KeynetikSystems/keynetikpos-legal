@@ -124,15 +124,15 @@ void ExpenseDialog::setupUI()
 
 void ExpenseDialog::loadExpenses()
 {
-    const QString from = fromDateEdit->date().toString("yyyy-MM-dd");
-    const QString to   = toDateEdit->date().toString("yyyy-MM-dd");
+    const QDate from = fromDateEdit->date();
+    const QDate to   = toDateEdit->date();
     const QVector<Expense> expenses = Database::instance().getExpensesByDateRange(from, to);
 
     expenseTable->setRowCount(expenses.size());
     Money total;
     for (int row = 0; row < expenses.size(); ++row) {
         const Expense &e = expenses[row];
-        expenseTable->setItem(row, 0, new QTableWidgetItem(e.date));
+        expenseTable->setItem(row, 0, new QTableWidgetItem(e.date.toString("yyyy-MM-dd")));
         expenseTable->setItem(row, 1, new QTableWidgetItem(e.categoryName));
         expenseTable->setItem(row, 2, new QTableWidgetItem(formatMoney(e.amount)));
         expenseTable->setItem(row, 3, new QTableWidgetItem(e.description));
@@ -205,7 +205,7 @@ void ExpenseDialog::onAddExpenseClicked()
     e.categoryId  = catCombo->currentData().toInt();
     e.amount      = Money::fromMajor(amountSpin->value());
     e.description = descEdit->text().trimmed();
-    e.date        = dateEdit->date().toString("yyyy-MM-dd");
+    e.date        = dateEdit->date();
     e.recordedBy  = UserManager::instance().getCurrentUsername();
 
     if (!Database::instance().addExpense(e)) {
@@ -222,7 +222,7 @@ void ExpenseDialog::onAddExpenseClicked()
         if (!lines.isEmpty()) {
             Ledger ledger(QSqlDatabase::database());
             ledger.initSchema();
-            const QDate when = QDate::fromString(e.date, "yyyy-MM-dd");
+            const QDate when = e.date;
             if (ledger.postEntry(when.isValid() ? when : QDate::currentDate(),
                                  "Expense: " + category, "expense", lines) < 0) {
                 UserManager::instance().logUserAction(

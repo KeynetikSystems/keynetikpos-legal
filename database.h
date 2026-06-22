@@ -28,6 +28,7 @@
 #include <QString>
 #include <QVector>
 #include <QPair>
+#include <QDate>
 #include <QDateTime>
 #include <cmath>
 
@@ -56,7 +57,7 @@ struct Product
 struct Sale
 {
     int id = 0;
-    QString saleDate;
+    QDateTime saleDate;     // when the sale was recorded (DB CURRENT_TIMESTAMP)
     Money subtotal;
     Money tax;
     Money discount;
@@ -64,6 +65,11 @@ struct Sale
     QString paymentMethod;
     Money amountPaid;
     Money changeDue;
+    // Audit context: who rang the sale up, and the open shift (0 = none).
+    // shiftId is plumbed through but only populated once a live shift is wired
+    // into the checkout flow; cashier is captured on every sale.
+    QString cashier;
+    int shiftId = 0;
 };
 
 struct SaleItem
@@ -150,7 +156,7 @@ struct Expense
     QString categoryName;   // joined
     Money amount;
     QString description;
-    QString date;           // YYYY-MM-DD
+    QDate date;             // the day the expense was incurred
     QString recordedBy;
     QString createdAt;
 };
@@ -171,6 +177,29 @@ struct Customer
     Money storeCredit;
     bool isActive = true;
     QString createdAt;
+};
+
+// Everything needed to record one sale. Bundling these into a value struct
+// (recordSale used to take 11 positional arguments — two adjacent Money args
+// with no labels were easy to transpose) keeps the call sites readable and
+// lets the request grow without re-churning every caller. The money fields are
+// the computed CartTotals; customerId/storeCreditUsed/payments/cashier/shiftId
+// are optional.
+struct SaleRequest
+{
+    QVector<SaleItem>    items;
+    Money                subtotal;
+    Money                tax;
+    Money                discount;
+    Money                total;
+    QString              paymentMethod;
+    Money                amountPaid;
+    Money                changeDue;
+    int                  customerId = 0;
+    Money                storeCreditUsed = Money::fromCents(0);
+    QVector<SalePayment> payments;
+    QString              cashier;       // username who processed the sale (audit)
+    int                  shiftId = 0;   // open shift at sale time, 0 if none
 };
 
 class Database
@@ -224,15 +253,9 @@ public:
     // and — when customerId > 0 — awards loyalty points + deducts any applied
     // store credit from the customer row, all in one transaction.
     // Returns the new sale id, or -1 (see getLastError()).
-    int recordSale(const QVector<SaleItem> &items,
-                   Money subtotal, Money tax, Money discount, Money total,
-                   const QString &paymentMethod,
-                   Money amountPaid, Money changeDue,
-                   int customerId = 0,
-                   Money storeCreditUsed = Money::fromCents(0),
-                   const QVector<SalePayment> &payments = {});
+    int recordSale(const SaleRequest &request);
     QVector<Sale> getAllSales();
-    QVector<Sale> getSalesByDateRange(const QString &startDate, const QString &endDate);
+    QVector<Sale> getSalesByDateRange(const QDate &startDate, const QDate &endDate);
     QVector<SaleItem> getSaleItems(int saleId);
     Sale getSaleById(int saleId);
 
@@ -244,8 +267,8 @@ public:
     // Per-method takings from sale_payments over [startDate, endDate] (inclusive,
     // 'yyyy-MM-dd'). Accurate for split tenders; only covers sales recorded after
     // the sale_payments table was added.
-    QVector<PaymentTotal> getPaymentTotalsByMethod(const QString &startDate,
-                                                   const QString &endDate);
+    QVector<PaymentTotal> getPaymentTotalsByMethod(const QDate &startDate,
+                                                   const QDate &endDate);
 
     // Stock adjustment & history
     bool logStockAdjustment(int productId, const QString &productName,
@@ -290,10 +313,10 @@ public:
     // Expense operations
     bool addExpense(const Expense &expense);
     QVector<Expense> getAllExpenses();
-    QVector<Expense> getExpensesByDateRange(const QString &startDate,
-                                            const QString &endDate);
+    QVector<Expense> getExpensesByDateRange(const QDate &startDate,
+                                            const QDate &endDate);
     // Sum of all expenses in the date range (for P&L computation).
-    Money getTotalExpenses(const QString &startDate, const QString &endDate);
+    Money getTotalExpenses(const QDate &startDate, const QDate &endDate);
 
     // Customer operations
     QVector<Customer> getAllCustomers(bool includeInactive = false);
@@ -333,7 +356,7 @@ public:
     bool verifyBackup(const QString &backupPath, QString *errorOut = nullptr);
 
     // Profit calculation
-    Money getActualGrossProfit(const QString &startDate, const QString &endDate);
+    Money getActualGrossProfit(const QDate &startDate, const QDate &endDate);
     Money getActualGrossProfitToday();
     Money getActualGrossProfitThisMonth();
 
@@ -346,8 +369,8 @@ public:
         Money grossProfit() const { return revenue - cogs; }
         Money netProfit()   const { return revenue - cogs - expenses; }
     };
-    QVector<ProfitLossRow> getProfitLossByDateRange(const QString &start,
-                                                    const QString &end);
+    QVector<ProfitLossRow> getProfitLossByDateRange(const QDate &start,
+                                                    const QDate &end);
 
     // Stock valuation: current qty * cost_price per product
     struct StockValuationRow {
@@ -376,6 +399,14 @@ private:
     bool initialized = false;   // guards against repeated initialize() calls
 
     bool createTables();
+    // Versioned schema migrations. schemaVersion()/setSchemaVersion() track the
+    // applied version in schema_meta (key 'schema_version'); runMigrations()
+    // applies every numbered step newer than the stored version, each in its own
+    // transaction, bumping the version as it goes. Steps are written to be
+    // idempotent so a fresh DB and an old DB converge to the same shape.
+    int  schemaVersion();
+    bool setSchemaVersion(int version);
+    bool runMigrations();
     bool migrateMoneyToCents();
     bool ensureColumn(const QString &table, const QString &column,
                       const QString &definition);

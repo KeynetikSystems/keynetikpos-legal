@@ -29,6 +29,7 @@
 #include <QSettings>
 #include <QStandardPaths>
 #include <QCoreApplication>
+#include <functional>
 
 Database& Database::instance()
 {
@@ -411,18 +412,101 @@ bool Database::createTables()
         }
     }
 
-    // Migrations for databases created before these columns existed
-    // (CREATE TABLE IF NOT EXISTS does not alter existing tables)
-    ensureColumn("sales", "amount_paid",        "INTEGER DEFAULT 0");
-    ensureColumn("sales", "change_due",         "INTEGER DEFAULT 0");
-    ensureColumn("sales", "customer_id",        "INTEGER DEFAULT 0");
-    ensureColumn("sales", "store_credit_used",  "INTEGER DEFAULT 0");
-    ensureColumn("users", "must_change_password", "INTEGER DEFAULT 0");
-    ensureColumn("products", "reorder_level",   "INTEGER NOT NULL DEFAULT 20");
+    // Numbered, version-tracked schema migrations (replaces the old loose pile
+    // of ensureColumn() calls). CREATE TABLE IF NOT EXISTS above is the baseline;
+    // runMigrations() brings both fresh and pre-existing databases up to the
+    // current version.
+    if (!runMigrations())
+        return false;
 
+    // One-time REAL->cents data conversion. Kept SEPARATE from runMigrations()
+    // and gated by its own marker row, never by schema_version: re-running it
+    // would re-scale every amount by 100, so it must never key off a version a
+    // legacy DB might still report as 0.
     if (!migrateMoneyToCents())
         return false;
 
+    return true;
+}
+
+// Current applied schema version (0 when the marker row is absent — i.e. a
+// database created before versioned migrations existed).
+int Database::schemaVersion()
+{
+    QSqlQuery q(db);
+    q.prepare("SELECT value FROM schema_meta WHERE key = 'schema_version'");
+    if (q.exec() && q.next())
+        return q.value(0).toInt();
+    return 0;
+}
+
+bool Database::setSchemaVersion(int version)
+{
+    QSqlQuery q(db);
+    q.prepare("INSERT OR REPLACE INTO schema_meta (key, value) "
+              "VALUES ('schema_version', ?)");
+    q.addBindValue(QString::number(version));
+    return q.exec();
+}
+
+// Applies every migration whose version is newer than the stored one, each in
+// its own transaction (DDL + version bump commit together). Every step is
+// written to be idempotent — ensureColumn() no-ops when the column already
+// exists — so an old database (reporting version 0 but already carrying some of
+// these columns) and a brand-new one both converge on the same final schema.
+bool Database::runMigrations()
+{
+    struct Migration {
+        int version;
+        const char *description;
+        std::function<bool()> apply;
+    };
+
+    const QVector<Migration> migrations = {
+        { 1, "sales: amount_paid / change_due / customer_id / store_credit_used",
+          [this] {
+              return ensureColumn("sales", "amount_paid",       "INTEGER DEFAULT 0")
+                  && ensureColumn("sales", "change_due",        "INTEGER DEFAULT 0")
+                  && ensureColumn("sales", "customer_id",       "INTEGER DEFAULT 0")
+                  && ensureColumn("sales", "store_credit_used", "INTEGER DEFAULT 0");
+          } },
+        { 2, "users: must_change_password",
+          [this] {
+              return ensureColumn("users", "must_change_password", "INTEGER DEFAULT 0");
+          } },
+        { 3, "products: reorder_level",
+          [this] {
+              return ensureColumn("products", "reorder_level", "INTEGER NOT NULL DEFAULT 20");
+          } },
+        { 4, "sales: cashier / shift_id (audit context)",
+          [this] {
+              return ensureColumn("sales", "cashier",  "TEXT DEFAULT ''")
+                  && ensureColumn("sales", "shift_id", "INTEGER DEFAULT 0");
+          } },
+    };
+
+    const int current = schemaVersion();
+    for (const Migration &m : migrations) {
+        if (m.version <= current)
+            continue;
+        if (!db.transaction()) {
+            lastError = "Migration " + QString::number(m.version)
+                      + " could not start a transaction: " + db.lastError().text();
+            return false;
+        }
+        if (!m.apply() || !setSchemaVersion(m.version)) {
+            db.rollback();
+            lastError = "Migration " + QString::number(m.version) + " ("
+                      + m.description + ") failed: " + lastError;
+            return false;
+        }
+        if (!db.commit()) {
+            lastError = "Migration " + QString::number(m.version)
+                      + " could not commit: " + db.lastError().text();
+            return false;
+        }
+        qDebug() << "Applied schema migration" << m.version << m.description;
+    }
     return true;
 }
 
@@ -819,13 +903,22 @@ int Database::getStock(int productId)
 
 // ==================== Sales operations ====================
 
-int Database::recordSale(const QVector<SaleItem> &items,
-                         Money subtotal, Money tax, Money discount, Money total,
-                         const QString &paymentMethod,
-                         Money amountPaid, Money changeDue,
-                         int customerId, Money storeCreditUsed,
-                         const QVector<SalePayment> &payments)
+int Database::recordSale(const SaleRequest &request)
 {
+    // Local aliases keep the (already long) transaction body readable and let
+    // the field-by-field SQL binding below stay unchanged.
+    const QVector<SaleItem>    &items           = request.items;
+    const Money                 subtotal        = request.subtotal;
+    const Money                 tax             = request.tax;
+    const Money                 discount        = request.discount;
+    const Money                 total           = request.total;
+    const QString              &paymentMethod   = request.paymentMethod;
+    const Money                 amountPaid      = request.amountPaid;
+    const Money                 changeDue       = request.changeDue;
+    const int                   customerId      = request.customerId;
+    const Money                 storeCreditUsed = request.storeCreditUsed;
+    const QVector<SalePayment> &payments        = request.payments;
+
     if (items.isEmpty()) {
         lastError = "Cannot record a sale with no items";
         return -1;
@@ -876,8 +969,9 @@ int Database::recordSale(const QVector<SaleItem> &items,
     QSqlQuery saleQuery(db);
     saleQuery.prepare("INSERT INTO sales "
                       "(subtotal, tax, discount, total, payment_method, "
-                      " amount_paid, change_due, customer_id, store_credit_used) "
-                      "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)");
+                      " amount_paid, change_due, customer_id, store_credit_used, "
+                      " cashier, shift_id) "
+                      "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)");
     saleQuery.addBindValue(subtotal.cents());
     saleQuery.addBindValue(tax.cents());
     saleQuery.addBindValue(discount.cents());
@@ -887,6 +981,8 @@ int Database::recordSale(const QVector<SaleItem> &items,
     saleQuery.addBindValue(changeDue.cents());
     saleQuery.addBindValue(customerId > 0 ? customerId : QVariant(QMetaType(QMetaType::Int)));
     saleQuery.addBindValue(storeCreditUsed.cents());
+    saleQuery.addBindValue(request.cashier);
+    saleQuery.addBindValue(request.shiftId);
     if (!saleQuery.exec()) {
         lastError = saleQuery.lastError().text();
         db.rollback();
@@ -969,9 +1065,11 @@ int Database::recordSale(const QVector<SaleItem> &items,
     return saleId;
 }
 
-QVector<PaymentTotal> Database::getPaymentTotalsByMethod(const QString &startDate,
-                                                         const QString &endDate)
+QVector<PaymentTotal> Database::getPaymentTotalsByMethod(const QDate &startDateArg,
+                                                         const QDate &endDateArg)
 {
+    const QString startDate = startDateArg.toString(Qt::ISODate);
+    const QString endDate   = endDateArg.toString(Qt::ISODate);
     QVector<PaymentTotal> totals;
     QSqlQuery query(db);
     // Prefer the per-tender rows; for sales recorded before sale_payments
@@ -1008,12 +1106,12 @@ QVector<Sale> Database::getAllSales()
 {
     QVector<Sale> sales;
     QSqlQuery query(db);
-    query.prepare("SELECT id, sale_date, subtotal, tax, discount, total, payment_method, amount_paid, change_due FROM sales ORDER BY sale_date DESC");
+    query.prepare("SELECT id, sale_date, subtotal, tax, discount, total, payment_method, amount_paid, change_due, cashier, shift_id FROM sales ORDER BY sale_date DESC");
     query.exec();
     while (query.next()) {
         Sale s;
         s.id = query.value(0).toInt();
-        s.saleDate = query.value(1).toString();
+        s.saleDate = query.value(1).toDateTime();
         s.subtotal = Money::fromCents(query.value(2).toLongLong());
         s.tax = Money::fromCents(query.value(3).toLongLong());
         s.discount = Money::fromCents(query.value(4).toLongLong());
@@ -1021,23 +1119,25 @@ QVector<Sale> Database::getAllSales()
         s.paymentMethod = query.value(6).toString();
         s.amountPaid = Money::fromCents(query.value(7).toLongLong());
         s.changeDue = Money::fromCents(query.value(8).toLongLong());
+        s.cashier = query.value(9).toString();
+        s.shiftId = query.value(10).toInt();
         sales.append(s);
     }
     return sales;
 }
 
-QVector<Sale> Database::getSalesByDateRange(const QString &startDate, const QString &endDate)
+QVector<Sale> Database::getSalesByDateRange(const QDate &startDate, const QDate &endDate)
 {
     QVector<Sale> sales;
     QSqlQuery query(db);
-    query.prepare("SELECT id, sale_date, subtotal, tax, discount, total, payment_method, amount_paid, change_due FROM sales WHERE DATE(sale_date) BETWEEN ? AND ? ORDER BY sale_date DESC");
-    query.addBindValue(startDate);
-    query.addBindValue(endDate);
+    query.prepare("SELECT id, sale_date, subtotal, tax, discount, total, payment_method, amount_paid, change_due, cashier, shift_id FROM sales WHERE DATE(sale_date) BETWEEN ? AND ? ORDER BY sale_date DESC");
+    query.addBindValue(startDate.toString(Qt::ISODate));
+    query.addBindValue(endDate.toString(Qt::ISODate));
     query.exec();
     while (query.next()) {
         Sale s;
         s.id = query.value(0).toInt();
-        s.saleDate = query.value(1).toString();
+        s.saleDate = query.value(1).toDateTime();
         s.subtotal = Money::fromCents(query.value(2).toLongLong());
         s.tax = Money::fromCents(query.value(3).toLongLong());
         s.discount = Money::fromCents(query.value(4).toLongLong());
@@ -1045,6 +1145,8 @@ QVector<Sale> Database::getSalesByDateRange(const QString &startDate, const QStr
         s.paymentMethod = query.value(6).toString();
         s.amountPaid = Money::fromCents(query.value(7).toLongLong());
         s.changeDue = Money::fromCents(query.value(8).toLongLong());
+        s.cashier = query.value(9).toString();
+        s.shiftId = query.value(10).toInt();
         sales.append(s);
     }
     return sales;
@@ -1076,12 +1178,12 @@ Sale Database::getSaleById(int saleId)
 {
     Sale s;
     QSqlQuery query(db);
-    query.prepare("SELECT id, sale_date, subtotal, tax, discount, total, payment_method, amount_paid, change_due FROM sales WHERE id = ?");
+    query.prepare("SELECT id, sale_date, subtotal, tax, discount, total, payment_method, amount_paid, change_due, cashier, shift_id FROM sales WHERE id = ?");
     query.addBindValue(saleId);
     query.exec();
     if (query.next()) {
         s.id = query.value(0).toInt();
-        s.saleDate = query.value(1).toString();
+        s.saleDate = query.value(1).toDateTime();
         s.subtotal = Money::fromCents(query.value(2).toLongLong());
         s.tax = Money::fromCents(query.value(3).toLongLong());
         s.discount = Money::fromCents(query.value(4).toLongLong());
@@ -1089,6 +1191,8 @@ Sale Database::getSaleById(int saleId)
         s.paymentMethod = query.value(6).toString();
         s.amountPaid = Money::fromCents(query.value(7).toLongLong());
         s.changeDue = Money::fromCents(query.value(8).toLongLong());
+        s.cashier = query.value(9).toString();
+        s.shiftId = query.value(10).toInt();
     }
     return s;
 }
@@ -1652,7 +1756,7 @@ bool Database::addExpense(const Expense &expense)
     q.addBindValue(expense.categoryId);
     q.addBindValue(expense.amount.cents());
     q.addBindValue(expense.description);
-    q.addBindValue(expense.date);
+    q.addBindValue(expense.date.toString(Qt::ISODate));
     q.addBindValue(expense.recordedBy);
     if (!q.exec()) {
         lastError = "Failed to record expense: " + q.lastError().text();
@@ -1669,7 +1773,7 @@ static Expense expenseFromQuery(QSqlQuery &q)
     e.categoryName = q.value(2).toString();
     e.amount       = Money::fromCents(q.value(3).toLongLong());
     e.description  = q.value(4).toString();
-    e.date         = q.value(5).toString();
+    e.date         = q.value(5).toDate();
     e.recordedBy   = q.value(6).toString();
     e.createdAt    = q.value(7).toString();
     return e;
@@ -1690,13 +1794,13 @@ QVector<Expense> Database::getAllExpenses()
     return list;
 }
 
-QVector<Expense> Database::getExpensesByDateRange(const QString &start, const QString &end)
+QVector<Expense> Database::getExpensesByDateRange(const QDate &start, const QDate &end)
 {
     QVector<Expense> list;
     QSqlQuery q(db);
     q.prepare(QString(expenseJoin) + "WHERE e.date BETWEEN ? AND ? ORDER BY e.date DESC");
-    q.addBindValue(start);
-    q.addBindValue(end);
+    q.addBindValue(start.toString(Qt::ISODate));
+    q.addBindValue(end.toString(Qt::ISODate));
     if (q.exec()) {
         while (q.next())
             list.append(expenseFromQuery(q));
@@ -1704,12 +1808,12 @@ QVector<Expense> Database::getExpensesByDateRange(const QString &start, const QS
     return list;
 }
 
-Money Database::getTotalExpenses(const QString &start, const QString &end)
+Money Database::getTotalExpenses(const QDate &start, const QDate &end)
 {
     QSqlQuery q(db);
     q.prepare("SELECT COALESCE(SUM(amount), 0) FROM expenses WHERE date BETWEEN ? AND ?");
-    q.addBindValue(start);
-    q.addBindValue(end);
+    q.addBindValue(start.toString(Qt::ISODate));
+    q.addBindValue(end.toString(Qt::ISODate));
     if (q.exec() && q.next())
         return Money::fromCents(q.value(0).toLongLong());
     return Money::fromCents(0);
@@ -1830,14 +1934,14 @@ QVector<Sale> Database::getCustomerPurchaseHistory(int customerId)
     QVector<Sale> sales;
     QSqlQuery q(db);
     q.prepare("SELECT id, sale_date, subtotal, tax, discount, total, "
-              "payment_method, amount_paid, change_due "
+              "payment_method, amount_paid, change_due, cashier, shift_id "
               "FROM sales WHERE customer_id = ? ORDER BY sale_date DESC");
     q.addBindValue(customerId);
     if (!q.exec()) return sales;
     while (q.next()) {
         Sale s;
         s.id            = q.value(0).toInt();
-        s.saleDate      = q.value(1).toString();
+        s.saleDate      = q.value(1).toDateTime();
         s.subtotal      = Money::fromCents(q.value(2).toLongLong());
         s.tax           = Money::fromCents(q.value(3).toLongLong());
         s.discount      = Money::fromCents(q.value(4).toLongLong());
@@ -1845,6 +1949,8 @@ QVector<Sale> Database::getCustomerPurchaseHistory(int customerId)
         s.paymentMethod = q.value(6).toString();
         s.amountPaid    = Money::fromCents(q.value(7).toLongLong());
         s.changeDue     = Money::fromCents(q.value(8).toLongLong());
+        s.cashier       = q.value(9).toString();
+        s.shiftId       = q.value(10).toInt();
         sales.append(s);
     }
     return sales;
@@ -1855,8 +1961,10 @@ QVector<Sale> Database::getCustomerPurchaseHistory(int customerId)
 // =============================================================================
 
 QVector<Database::ProfitLossRow> Database::getProfitLossByDateRange(
-    const QString &start, const QString &end)
+    const QDate &startArg, const QDate &endArg)
 {
+    const QString start = startArg.toString(Qt::ISODate);
+    const QString end   = endArg.toString(Qt::ISODate);
     // Revenue + COGS grouped by day from sales/sale_items
     QMap<QString, ProfitLossRow> rows;
 
@@ -2099,7 +2207,7 @@ bool Database::verifyBackup(const QString &backupPath, QString *errorOut)
 
 // ==================== Profit calculation methods ====================
 
-Money Database::getActualGrossProfit(const QString &startDate, const QString &endDate)
+Money Database::getActualGrossProfit(const QDate &startDate, const QDate &endDate)
 {
     QSqlQuery query(db);
     query.prepare(
@@ -2107,8 +2215,8 @@ Money Database::getActualGrossProfit(const QString &startDate, const QString &en
         "FROM sale_items si "
         "JOIN sales s ON si.sale_id = s.id "
         "WHERE DATE(s.sale_date) BETWEEN ? AND ?");
-    query.addBindValue(startDate);
-    query.addBindValue(endDate);
+    query.addBindValue(startDate.toString(Qt::ISODate));
+    query.addBindValue(endDate.toString(Qt::ISODate));
     if (query.exec() && query.next()) {
         return Money::fromCents(query.value("total_profit").toLongLong());
     }

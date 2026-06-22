@@ -57,9 +57,23 @@ CheckoutResult CheckoutService::finalizeSale(const Cart &cart,
 
     // Atomic: sale + items + stock decrement + customer loyalty/credit all
     // commit together, or nothing does.
-    const int saleId = Database::instance().recordSale(
-        saleItems, t.subtotal, t.tax, t.discount, t.total,
-        paymentMethod, amountPaid, change, customerId, storeCreditUsed, payments);
+    SaleRequest request;
+    request.items           = saleItems;
+    request.subtotal        = t.subtotal;
+    request.tax             = t.tax;
+    request.discount        = t.discount;
+    request.total           = t.total;
+    request.paymentMethod   = paymentMethod;
+    request.amountPaid      = amountPaid;
+    request.changeDue       = change;
+    request.customerId      = customerId;
+    request.storeCreditUsed = storeCreditUsed;
+    request.payments        = payments;
+    // Audit: stamp the sale with the signed-in cashier. shiftId stays 0 until a
+    // live shift is wired into checkout (ShiftManager isn't on this path yet).
+    request.cashier         = UserManager::instance().getCurrentUsername();
+
+    const int saleId = Database::instance().recordSale(request);
 
     if (saleId < 0) {
         result.error = Database::instance().getLastError();
