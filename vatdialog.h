@@ -26,7 +26,6 @@ public:
 private slots:
     void computeReturn();
     void recordPayment();
-    void editRate();
     void refreshProducts();
 
 private:

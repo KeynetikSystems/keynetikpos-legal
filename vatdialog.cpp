@@ -55,10 +55,9 @@ VatDialog::VatDialog(Vat *vat, QWidget *parent)
     period->addWidget(computeBtn);
     period->addStretch();
     m_rateLabel = new QLabel();
+    m_rateLabel->setToolTip("The standard VAT rate follows the sale-tax rate in "
+                            "Settings → Tax.");
     period->addWidget(m_rateLabel);
-    auto *rateBtn = new QPushButton("Rate...");
-    connect(rateBtn, &QPushButton::clicked, this, &VatDialog::editRate);
-    period->addWidget(rateBtn);
     retLay->addLayout(period);
 
     auto *grid = new QGroupBox("VAT-3 Summary");
@@ -105,7 +104,8 @@ VatDialog::VatDialog(Vat *vat, QWidget *parent)
     connect(box, &QDialogButtonBox::rejected, this, &QDialog::reject);
     root->addWidget(box);
 
-    m_rateLabel->setText(QString("Standard rate: %1%").arg(m_vat->standardRate() * 100, 0, 'g', 4));
+    m_rateLabel->setText(QString("Standard rate: %1%  (from Settings → Tax)")
+                             .arg(m_vat->standardRate() * 100, 0, 'g', 4));
     refreshProducts();
     computeReturn();
 }
@@ -144,29 +144,6 @@ void VatDialog::recordPayment()
     }
     QMessageBox::information(this, "VAT Payment Posted",
         "Recorded as ledger entry #" + QString::number(entry) + ".");
-}
-
-void VatDialog::editRate()
-{
-    bool ok = false;
-    QDialog dlg(this);
-    dlg.setWindowTitle("Standard VAT Rate");
-    auto *form = new QFormLayout(&dlg);
-    auto *spin = new QDoubleSpinBox();
-    spin->setRange(0, 100);
-    spin->setDecimals(2);
-    spin->setSuffix(" %");
-    spin->setValue(m_vat->standardRate() * 100.0);
-    form->addRow("Standard rate:", spin);
-    auto *box = new QDialogButtonBox(QDialogButtonBox::Save | QDialogButtonBox::Cancel);
-    form->addRow(box);
-    connect(box, &QDialogButtonBox::accepted, &dlg, [&]{ ok = true; dlg.accept(); });
-    connect(box, &QDialogButtonBox::rejected, &dlg, &QDialog::reject);
-    if (dlg.exec() != QDialog::Accepted || !ok) return;
-
-    m_vat->setStandardRate(spin->value() / 100.0);
-    m_rateLabel->setText(QString("Standard rate: %1%").arg(m_vat->standardRate() * 100, 0, 'g', 4));
-    computeReturn();
 }
 
 void VatDialog::refreshProducts()

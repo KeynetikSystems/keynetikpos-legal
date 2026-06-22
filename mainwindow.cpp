@@ -196,6 +196,16 @@ MainWindow::MainWindow(QWidget *parent)
     // any widget renders a price (setupUI runs below).
     setCurrencySymbol(settingsManager->settings().currencySymbol);
 
+    // Keep the VAT module's standard rate in lock-step with the POS sale-tax
+    // rate (Settings -> Tax). One editable number drives both what customers
+    // are charged and how VAT-3 / purchase VAT are computed, so they can never
+    // drift apart.
+    {
+        Vat vat(appDb);
+        vat.initSchema();
+        vat.setStandardRate(settingsManager->settings().taxRate);
+    }
+
     inventoryManager = new InventoryManager();
 
     // ── Schedule / messaging ────────────────────────────────────────────────
@@ -264,6 +274,10 @@ MainWindow::MainWindow(QWidget *parent)
         refreshTaxTitle();
         updateTotals();
         loadProducts();   // re-render price tags with the (possibly) new symbol
+        // Mirror the new sale-tax rate into the VAT module (single source).
+        Vat vat(QSqlDatabase::database());
+        vat.initSchema();
+        vat.setStandardRate(settingsManager->settings().taxRate);
     });
 
     // ── Deferred startup ────────────────────────────────────────────────────
