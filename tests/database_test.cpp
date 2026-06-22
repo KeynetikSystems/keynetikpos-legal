@@ -107,6 +107,27 @@ private slots:
         QCOMPARE(dbi().getSaleById(saleId).total.cents(), 30000);
     }
 
+    // Item 6 + item 5: the cashier/shift_id audit columns are added by schema
+    // migration 4, and recordSale must round-trip them. This also indirectly
+    // proves the migration ran (the INSERT/SELECT reference columns that only
+    // exist after it applied) and that saleDate reads back as a valid QDateTime.
+    void recordSale_persistsCashierAndShift()
+    {
+        const int pid = addProduct("AUDIT1", m(10000), 5);
+        SaleRequest r = sale({ line(pid, "Test AUDIT1", 1, m(10000)) },
+                             m(10000), m(0), m(0), m(10000), "Cash", m(10000), m(0));
+        r.cashier = "alice";
+        r.shiftId = 42;
+
+        const int saleId = dbi().recordSale(r);
+        QVERIFY(saleId > 0);
+
+        const Sale s = dbi().getSaleById(saleId);
+        QCOMPARE(s.cashier, QStringLiteral("alice"));
+        QCOMPARE(s.shiftId, 42);
+        QVERIFY(s.saleDate.isValid());
+    }
+
     void recordSale_emptyItemsRejected()
     {
         const int saleId = dbi().recordSale(sale({}, m(0), m(0), m(0), m(0), "Cash", m(0), m(0)));
