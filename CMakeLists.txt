@@ -54,6 +54,8 @@ set(PROJECT_SOURCES
     checkoutservice.cpp checkoutservice.h
     ledger.cpp ledger.h
     ledgerdialog.cpp ledgerdialog.h
+    payroll.cpp payroll.h
+    payrolldialog.cpp payrolldialog.h
     carttotals.cpp carttotals.h
     providersetup.cpp providersetup.h
     appstyle.cpp appstyle.h
@@ -308,4 +310,20 @@ if(KEYNETIK_BUILD_TESTS)
         Qt${QT_VERSION_MAJOR}::Test
     )
     add_test(NAME ledger_test COMMAND ledger_test)
+
+    # Kenya statutory-deduction engine (pure math; links ledger.cpp for posting).
+    add_executable(payroll_test
+        tests/payroll_test.cpp
+        payroll.cpp payroll.h
+        ledger.cpp ledger.h
+    )
+    set_target_properties(payroll_test PROPERTIES AUTOMOC ON)
+    target_include_directories(payroll_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+    target_compile_options(payroll_test PRIVATE ${KEYNETIK_WARNINGS})
+    target_link_libraries(payroll_test PRIVATE
+        Qt${QT_VERSION_MAJOR}::Core
+        Qt${QT_VERSION_MAJOR}::Sql
+        Qt${QT_VERSION_MAJOR}::Test
+    )
+    add_test(NAME payroll_test COMMAND payroll_test)
 endif()

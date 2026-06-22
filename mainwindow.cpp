@@ -52,6 +52,8 @@
 #include "checkoutservice.h"
 #include "ledger.h"
 #include "ledgerdialog.h"
+#include "payrolldialog.h"
+#include "payroll.h"
 #include "providersetup.h"
 #include "appstyle.h"
 #include "productgridmodel.h"
@@ -578,6 +580,14 @@ void MainWindow::setupMenuBar()
         Ledger ledger(QSqlDatabase::database());
         ledger.initSchema();
         LedgerDialog dlg(&ledger, this);
+        dlg.exec();
+    });
+    connect(financeMenu->addAction("Payroll..."),
+            &QAction::triggered, this, [this]() {
+        if (!checkLicenseTier(this, 4, "Payroll")) return;
+        Payroll payroll(QSqlDatabase::database());
+        payroll.initSchema();
+        PayrollDialog dlg(&payroll, this);
         dlg.exec();
     });
 
