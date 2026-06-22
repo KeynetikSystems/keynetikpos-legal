@@ -54,6 +54,7 @@ set(PROJECT_SOURCES
     checkoutservice.cpp checkoutservice.h
     ledger.cpp ledger.h
     ledgerdialog.cpp ledgerdialog.h
+    salejournal.cpp salejournal.h
     payroll.cpp payroll.h
     payrolldialog.cpp payrolldialog.h
     vat.cpp vat.h
@@ -345,4 +346,21 @@ if(KEYNETIK_BUILD_TESTS)
         Qt${QT_VERSION_MAJOR}::Test
     )
     add_test(NAME vat_test COMMAND vat_test)
+
+    # Sale -> GL journal builder (pure; balanced double-entry per sale).
+    add_executable(salejournal_test
+        tests/salejournal_test.cpp
+        salejournal.cpp salejournal.h
+    )
+    set_target_properties(salejournal_test PROPERTIES AUTOMOC ON)
+    target_include_directories(salejournal_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+    target_compile_options(salejournal_test PRIVATE ${KEYNETIK_WARNINGS})
+    # Qt::Sql only so ledger.h's <QSqlDatabase> include (via salejournal.h)
+    # resolves — the builder uses no database itself.
+    target_link_libraries(salejournal_test PRIVATE
+        Qt${QT_VERSION_MAJOR}::Core
+        Qt${QT_VERSION_MAJOR}::Sql
+        Qt${QT_VERSION_MAJOR}::Test
+    )
+    add_test(NAME salejournal_test COMMAND salejournal_test)
 endif()

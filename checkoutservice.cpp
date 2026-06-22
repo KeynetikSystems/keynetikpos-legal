@@ -16,7 +16,11 @@
 #include "inventorymanager.h"
 #include "receiptprinter.h"
 #include "usermanager.h"
+#include "ledger.h"
+#include "salejournal.h"
 
+#include <QSqlDatabase>
+#include <QDate>
 #include <QDateTime>
 
 CheckoutService::CheckoutService(InventoryManager *inventory,
@@ -66,6 +70,40 @@ CheckoutResult CheckoutService::finalizeSale(const Cart &cart,
 
     for (const CartItem &item : cart.items)
         m_inventory->refreshAfterSale(item.productId);
+
+    // Auto-post the sale to the General Ledger so the books stay complete:
+    // Dr cash/M-Pesa/bank (+ AR for non-cash) / Cr Sales + VAT, plus the
+    // COGS/Inventory pair. Best-effort and isolated — a ledger hiccup must
+    // never undo a durably recorded sale.
+    {
+        QVector<SaleTender> tenders;
+        if (payments.isEmpty()) {
+            // Single-tender path: the whole net amount went to one method.
+            tenders.append({ paymentMethod, t.total - storeCreditUsed });
+        } else {
+            for (const SalePayment &p : payments)
+                tenders.append({ p.method, p.amount });
+        }
+
+        Money cogs;
+        for (const CartItem &item : cart.items)
+            cogs += item.costPrice * item.quantity;
+
+        const QVector<GLLine> lines =
+            buildSaleJournal(t.total, t.tax, tenders, storeCreditUsed, cogs);
+
+        if (!lines.isEmpty()) {
+            Ledger ledger(QSqlDatabase::database());
+            ledger.initSchema();   // idempotent; ensures the chart exists
+            if (ledger.postEntry(QDate::currentDate(),
+                                 QString("Sale #%1").arg(saleId), "sale", lines) < 0) {
+                UserManager::instance().logUserAction(
+                    "Ledger Posting Failed",
+                    QString("Sale #%1 not posted to GL: %2")
+                        .arg(saleId).arg(ledger.lastError()));
+            }
+        }
+    }
 
     Receipt receipt;
     receipt.saleId          = saleId;

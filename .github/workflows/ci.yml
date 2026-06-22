@@ -29,7 +29,7 @@ jobs:
       # Build only the test targets — the full GUI app pulls in Windows-only
       # APIs that don't compile on Linux.
       - name: Build tests
-        run: cmake --build build --target carttotals_test database_test ledger_test payroll_test vat_test -j
+        run: cmake --build build --target carttotals_test database_test ledger_test payroll_test vat_test salejournal_test -j
 
       - name: Run tests
         run: ctest --test-dir build --output-on-failure
