@@ -1,0 +1,20 @@
+# Treat binary assets as binary so Git never applies line-ending (CRLF) or text
+# filters to them — otherwise PDFs/images/installers get corrupted on checkout.
+*.pdf   binary
+*.png   binary
+*.jpg   binary
+*.jpeg  binary
+*.ico   binary
+*.gif   binary
+*.qm    binary
+*.exe   binary
+
+# Source stays as text with normalized LF in the repo; Git handles the working
+# copy per the user's core.autocrlf setting.
+*.cpp   text
+*.h     text
+*.py    text
+*.md    text
+*.txt   text
+*.cmake text
+*.json  text
