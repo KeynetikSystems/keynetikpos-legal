@@ -63,6 +63,30 @@ static const QString SERVER_URL = "https://keynetik-license.<account>.workers.de
 
 (no port, no trailing slash) and rebuild.
 
+## Plans & pricing
+
+Tiers are **one-time / perpetual** — the pitch is "pay once" vs. competitors'
+monthly SaaS (each tier costs well under a year of the tool it replaces, then
+it's free forever).
+
+| Tier | Plan | One-time price | Unlocks |
+|---|---|---|---|
+| 1 | POS Core | (floor) | checkout, products, inventory, M-Pesa, receipts |
+| 2 | POS Pro | **KSh 8,000** | reports, analytics, users, schedules, barcode, messaging |
+| 3 | ERP Lite | **KSh 18,000** | suppliers, purchase orders, expenses, customers, P&L |
+| 4 | ERP Full | **KSh 35,000** | general ledger, payroll, VAT |
+
+These prices are the `tierForAmount()` constants in `src/index.js` — the
+**self-serve M-Pesa** price list: a customer pays the tier's price and the
+Worker grants that tier (paying between tiers rounds down; any completed payment
+grants at least POS Core). To change a price, edit the constant and re-deploy.
+
+Multi-till deals grant more device seats and are sold **manually**
+(`New-License -Tier N -MaxDevices M`), not through the M-Pesa price map.
+
+> Prices are a market-positioned starting point — validate against current local
+> competitor quotes (Loyverse add-ons, QuickBooks KE, Odoo/Sage) before publishing.
+
 ## Day-to-day key management
 
 Mint keys (checksum format the client accepts) with the repo tool:
