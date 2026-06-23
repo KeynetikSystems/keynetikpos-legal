@@ -624,6 +624,16 @@ void MainWindow::setupMenuBar()
             &QAction::triggered, this, &MainWindow::onManageSchedules);
     connect(settingsMenu->addAction("Receipt Settings"),
             &QAction::triggered, this, &MainWindow::onReceiptSettings);
+    // Finance Act / statutory payroll variables (PAYE, NSSF, SHIF, Housing Levy)
+    // — the same editor reachable from Finance -> Payroll, surfaced here so an
+    // admin can find it under Settings. Gated to the ERP-Full tier like Payroll.
+    connect(settingsMenu->addAction("Statutory Payroll Rates..."),
+            &QAction::triggered, this, [this]() {
+        if (!checkLicenseTier(this, 4, "Statutory Payroll Rates")) return;
+        Payroll payroll(QSqlDatabase::database());
+        payroll.initSchema();
+        PayrollDialog::editStatutoryRates(this, payroll);
+    });
     connect(settingsMenu->addAction("Backup Now"),
             &QAction::triggered, this, &MainWindow::onBackupNow);
     settingsMenu->addSeparator();

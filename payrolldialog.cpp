@@ -261,10 +261,18 @@ void PayrollDialog::showRun(int runId)
 
 void PayrollDialog::editRates()
 {
-    PayrollRates r = m_payroll->rates();
+    // Thin wrapper around the shared editor so the Payroll screen and the
+    // Settings menu open exactly the same form; refresh our caption on save.
+    if (editStatutoryRates(this, *m_payroll))
+        refreshRatesCaption();
+}
 
-    QDialog dlg(this);
-    dlg.setWindowTitle("Statutory Rates");
+bool PayrollDialog::editStatutoryRates(QWidget *parent, Payroll &payroll)
+{
+    PayrollRates r = payroll.rates();
+
+    QDialog dlg(parent);
+    dlg.setWindowTitle("Statutory Rates (Finance Act)");
     dlg.setMinimumWidth(420);
     auto *form = new QFormLayout(&dlg);
 
@@ -307,7 +315,7 @@ void PayrollDialog::editRates()
     form->addRow(box);
     connect(box, &QDialogButtonBox::accepted, &dlg, &QDialog::accept);
     connect(box, &QDialogButtonBox::rejected, &dlg, &QDialog::reject);
-    if (dlg.exec() != QDialog::Accepted) return;
+    if (dlg.exec() != QDialog::Accepted) return false;
 
     r.payeBand1 = Money::fromMajor(b1->value());
     r.payeBand2 = Money::fromMajor(b2->value());
@@ -321,8 +329,7 @@ void PayrollDialog::editRates()
     r.housingRate = houseR->value() / 100.0;
     r.effectiveDate = effDate->text().trimmed();
     r.ratesNote     = srcNote->text().trimmed();
-    m_payroll->saveRates(r);
-    refreshRatesCaption();
+    return payroll.saveRates(r);
 }
 
 void PayrollDialog::refreshRatesCaption()

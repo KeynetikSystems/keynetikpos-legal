@@ -22,6 +22,12 @@ class PayrollDialog : public QDialog
 public:
     explicit PayrollDialog(Payroll *payroll, QWidget *parent = nullptr);
 
+    // Opens the statutory-rates editor (PAYE bands, NSSF, SHIF, Housing Levy +
+    // the effective date and source note). Standalone/static so it can be
+    // reached from both the Payroll screen and the Settings menu. Returns true
+    // if the user saved.
+    static bool editStatutoryRates(QWidget *parent, Payroll &payroll);
+
 private slots:
     void refreshEmployees();
     void addEmployee();
