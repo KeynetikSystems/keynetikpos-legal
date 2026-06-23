@@ -19,6 +19,11 @@
 #include "salerepository.h"
 #include "supplierrepository.h"
 #include "customerrepository.h"
+#include "productrepository.h"
+#include "expenserepository.h"
+#include "purchaseorderrepository.h"
+#include "refundrepository.h"
+#include "salesanalyticsrepository.h"
 #include "passwordhasher.h"
 #include "money.h"           // Money
 #include <QSqlQuery>
@@ -144,23 +149,7 @@ bool Database::isOpen() const
 bool Database::adjustStockWithLog(int productId, int qtyChange,
                                   const QString &reason, const QString &adjustedBy)
 {
-    if (!db.transaction()) return false;
-
-    Product p = getProductById(productId);
-    int oldQty = p.stockQuantity;
-    int newQty = oldQty + qtyChange;
-
-    if (!updateStock(productId, newQty)) {
-        db.rollback();
-        return false;
-    }
-
-    if (!logStockAdjustment(productId, p.name, oldQty, newQty, reason, adjustedBy)) {
-        db.rollback();
-        return false;
-    }
-
-    return db.commit();
+    return ProductRepository(db).adjustStockWithLog(productId, qtyChange, reason, adjustedBy);
 }
 bool Database::createTables()
 {
@@ -696,212 +685,81 @@ bool Database::insertSampleData()
 
 QVector<Product> Database::getAllProducts()
 {
-    QVector<Product> products;
-    QSqlQuery query(db);
-    query.prepare("SELECT id, name, category, price, cost_price, profit_margin, stock_quantity, reorder_level, barcode, is_active FROM products WHERE is_active = 1");
-    query.exec();
-    while (query.next()) {
-        Product p;
-        p.id = query.value(0).toInt();
-        p.name = query.value(1).toString();
-        p.category = query.value(2).toString();
-        p.price = Money::fromCents(query.value(3).toLongLong());
-        p.costPrice = Money::fromCents(query.value(4).toLongLong());
-        p.profitMargin = query.value(5).toDouble();
-        p.stockQuantity = query.value(6).toInt();
-        p.reorderLevel = query.value(7).toInt();
-        p.barcode = query.value(8).toString();
-        p.isActive = query.value(9).toBool();
-        products.append(p);
-    }
-    return products;
+    return ProductRepository(db).getAllProducts();
 }
 
 QVector<Product> Database::getProductsByCategory(const QString &category)
 {
-    QVector<Product> products;
-    QSqlQuery query(db);
-    query.prepare("SELECT id, name, category, price, cost_price, profit_margin, stock_quantity, reorder_level, barcode, is_active FROM products WHERE category = ? AND is_active = 1");
-    query.addBindValue(category);
-    query.exec();
-    while (query.next()) {
-        Product p;
-        p.id = query.value(0).toInt();
-        p.name = query.value(1).toString();
-        p.category = query.value(2).toString();
-        p.price = Money::fromCents(query.value(3).toLongLong());
-        p.costPrice = Money::fromCents(query.value(4).toLongLong());
-        p.profitMargin = query.value(5).toDouble();
-        p.stockQuantity = query.value(6).toInt();
-        p.reorderLevel = query.value(7).toInt();
-        p.barcode = query.value(8).toString();
-        p.isActive = query.value(9).toBool();
-        products.append(p);
-    }
-    return products;
+    return ProductRepository(db).getProductsByCategory(category);
 }
 
 Product Database::getProductById(int id)
 {
-    Product p;
-    QSqlQuery query(db);
-    query.prepare("SELECT id, name, category, price, cost_price, profit_margin, stock_quantity, reorder_level, barcode, is_active FROM products WHERE id = ?");
-    query.addBindValue(id);
-    query.exec();
-    if (query.next()) {
-        p.id = query.value(0).toInt();
-        p.name = query.value(1).toString();
-        p.category = query.value(2).toString();
-        p.price = Money::fromCents(query.value(3).toLongLong());
-        p.costPrice = Money::fromCents(query.value(4).toLongLong());
-        p.profitMargin = query.value(5).toDouble();
-        p.stockQuantity = query.value(6).toInt();
-        p.reorderLevel = query.value(7).toInt();
-        p.barcode = query.value(8).toString();
-        p.isActive = query.value(9).toBool();
-    }
-    return p;
+    return ProductRepository(db).getProductById(id);
 }
 
 Product Database::getProductByBarcode(const QString &barcode)
 {
-    Product p;
-    QSqlQuery query(db);
-    query.prepare("SELECT id, name, category, price, cost_price, profit_margin, stock_quantity, reorder_level, barcode, is_active FROM products WHERE barcode = ?");
-    query.addBindValue(barcode);
-    query.exec();
-    if (query.next()) {
-        p.id = query.value(0).toInt();
-        p.name = query.value(1).toString();
-        p.category = query.value(2).toString();
-        p.price = Money::fromCents(query.value(3).toLongLong());
-        p.costPrice = Money::fromCents(query.value(4).toLongLong());
-        p.profitMargin = query.value(5).toDouble();
-        p.stockQuantity = query.value(6).toInt();
-        p.reorderLevel = query.value(7).toInt();
-        p.barcode = query.value(8).toString();
-        p.isActive = query.value(9).toBool();
-    }
-    return p;
+    return ProductRepository(db).getProductByBarcode(barcode);
 }
 
 bool Database::addProduct(const Product &product)
 {
-    QSqlQuery query(db);
-    const Money sellingPrice = Product::calculateSellingPrice(product.costPrice, product.profitMargin);
-    query.prepare("INSERT INTO products (name, category, cost_price, profit_margin, price, stock_quantity, reorder_level, barcode) VALUES (?, ?, ?, ?, ?, ?, ?, ?)");
-    query.addBindValue(product.name);
-    query.addBindValue(product.category);
-    query.addBindValue(product.costPrice.cents());
-    query.addBindValue(product.profitMargin);
-    query.addBindValue(sellingPrice.cents());
-    query.addBindValue(product.stockQuantity);
-    query.addBindValue(product.reorderLevel);
-    query.addBindValue(product.barcode);
-    if (!query.exec()) {
-        lastError = query.lastError().text();
-        return false;
-    }
-    return true;
+    ProductRepository repo(db);
+    const bool ok = repo.addProduct(product);
+    lastError = repo.lastError();
+    return ok;
 }
 
 bool Database::updateProduct(const Product &product)
 {
-    QSqlQuery query(db);
-    const Money sellingPrice = Product::calculateSellingPrice(product.costPrice, product.profitMargin);
-    query.prepare("UPDATE products SET name = ?, category = ?, cost_price = ?, profit_margin = ?, price = ?, stock_quantity = ?, reorder_level = ?, barcode = ?, is_active = ? WHERE id = ?");
-    query.addBindValue(product.name);
-    query.addBindValue(product.category);
-    query.addBindValue(product.costPrice.cents());
-    query.addBindValue(product.profitMargin);
-    query.addBindValue(sellingPrice.cents());
-    query.addBindValue(product.stockQuantity);
-    query.addBindValue(product.reorderLevel);
-    query.addBindValue(product.barcode);
-    query.addBindValue(product.isActive);
-    query.addBindValue(product.id);
-    if (!query.exec()) {
-        lastError = query.lastError().text();
-        return false;
-    }
-    return true;
+    ProductRepository repo(db);
+    const bool ok = repo.updateProduct(product);
+    lastError = repo.lastError();
+    return ok;
 }
 
 bool Database::deleteProduct(int id)
 {
-    QSqlQuery query(db);
-    query.prepare("UPDATE products SET is_active = 0 WHERE id = ?");
-    query.addBindValue(id);
-    if (!query.exec()) {
-        lastError = query.lastError().text();
-        return false;
-    }
-    return true;
+    ProductRepository repo(db);
+    const bool ok = repo.deleteProduct(id);
+    lastError = repo.lastError();
+    return ok;
 }
 
 QStringList Database::getAllCategories()
 {
-    QStringList categories;
-    QSqlQuery query(db);
-    query.prepare("SELECT DISTINCT category FROM products WHERE is_active = 1 ORDER BY category");
-    query.exec();
-    while (query.next()) {
-        categories.append(query.value(0).toString());
-    }
-    return categories;
+    return ProductRepository(db).getAllCategories();
 }
 
 // ==================== Inventory operations ====================
 
 bool Database::updateStock(int productId, int newQuantity)
 {
-    QSqlQuery query(db);
-    query.prepare("UPDATE products SET stock_quantity = ? WHERE id = ?");
-    query.addBindValue(newQuantity);
-    query.addBindValue(productId);
-    return query.exec();
+    return ProductRepository(db).updateStock(productId, newQuantity);
 }
 
 bool Database::setReorderLevel(int productId, int level)
 {
-    QSqlQuery query(db);
-    query.prepare("UPDATE products SET reorder_level = ? WHERE id = ?");
-    query.addBindValue(level);
-    query.addBindValue(productId);
-    if (!query.exec()) {
-        lastError = query.lastError().text();
-        return false;
-    }
-    return true;
+    ProductRepository repo(db);
+    const bool ok = repo.setReorderLevel(productId, level);
+    lastError = repo.lastError();
+    return ok;
 }
 
 bool Database::decreaseStock(int productId, int quantity)
 {
-    QSqlQuery query(db);
-    query.prepare("UPDATE products SET stock_quantity = stock_quantity - ? WHERE id = ?");
-    query.addBindValue(quantity);
-    query.addBindValue(productId);
-    return query.exec();
+    return ProductRepository(db).decreaseStock(productId, quantity);
 }
 
 bool Database::increaseStock(int productId, int quantity)
 {
-    QSqlQuery query(db);
-    query.prepare("UPDATE products SET stock_quantity = stock_quantity + ? WHERE id = ?");
-    query.addBindValue(quantity);
-    query.addBindValue(productId);
-    return query.exec();
+    return ProductRepository(db).increaseStock(productId, quantity);
 }
 
 int Database::getStock(int productId)
 {
-    QSqlQuery query(db);
-    query.prepare("SELECT stock_quantity FROM products WHERE id = ?");
-    query.addBindValue(productId);
-    if (query.exec() && query.next()) {
-        return query.value(0).toInt();
-    }
-    return 0;
+    return ProductRepository(db).getStock(productId);
 }
 
 // ==================== Sales operations ====================
@@ -917,38 +775,7 @@ int Database::recordSale(const SaleRequest &request)
 QVector<PaymentTotal> Database::getPaymentTotalsByMethod(const QDate &startDateArg,
                                                          const QDate &endDateArg)
 {
-    const QString startDate = startDateArg.toString(Qt::ISODate);
-    const QString endDate   = endDateArg.toString(Qt::ISODate);
-    QVector<PaymentTotal> totals;
-    QSqlQuery query(db);
-    // Prefer the per-tender rows; for sales recorded before sale_payments
-    // existed (no rows), fall back to the sale's own payment_method/total so no
-    // history is lost.
-    query.prepare(
-        "SELECT method, SUM(amount) AS total, COUNT(*) AS cnt FROM ("
-        "  SELECT sp.method AS method, sp.amount AS amount "
-        "    FROM sale_payments sp JOIN sales s ON sp.sale_id = s.id "
-        "    WHERE DATE(s.sale_date) BETWEEN ? AND ? "
-        "  UNION ALL "
-        "  SELECT s.payment_method AS method, s.total AS amount "
-        "    FROM sales s "
-        "    WHERE DATE(s.sale_date) BETWEEN ? AND ? "
-        "      AND NOT EXISTS (SELECT 1 FROM sale_payments sp2 WHERE sp2.sale_id = s.id)"
-        ") GROUP BY method ORDER BY total DESC");
-    query.addBindValue(startDate);
-    query.addBindValue(endDate);
-    query.addBindValue(startDate);
-    query.addBindValue(endDate);
-    if (query.exec()) {
-        while (query.next()) {
-            PaymentTotal t;
-            t.method = query.value(0).toString();
-            t.total  = Money::fromCents(query.value(1).toLongLong());
-            t.count  = query.value(2).toInt();
-            totals.append(t);
-        }
-    }
-    return totals;
+    return SalesAnalyticsRepository(db).getPaymentTotalsByMethod(startDateArg, endDateArg);
 }
 
 QVector<Sale> Database::getAllSales()
@@ -975,165 +802,47 @@ Sale Database::getSaleById(int saleId)
 
 Money Database::getTotalSalesToday()
 {
-    QSqlQuery query(db);
-    query.prepare("SELECT SUM(total) FROM sales WHERE DATE(sale_date) = DATE('now')");
-    if (query.exec() && query.next()) {
-        return Money::fromCents(query.value(0).toLongLong());
-    }
-    return Money();
+    return SalesAnalyticsRepository(db).getTotalSalesToday();
 }
 
 Money Database::getTotalSalesThisMonth()
 {
-    QSqlQuery query(db);
-    query.prepare("SELECT SUM(total) FROM sales WHERE strftime('%Y-%m', sale_date) = strftime('%Y-%m', 'now')");
-    if (query.exec() && query.next()) {
-        return Money::fromCents(query.value(0).toLongLong());
-    }
-    return Money();
+    return SalesAnalyticsRepository(db).getTotalSalesThisMonth();
 }
 
 int Database::getTotalTransactionsToday()
 {
-    QSqlQuery query(db);
-    query.prepare("SELECT COUNT(*) FROM sales WHERE DATE(sale_date) = DATE('now')");
-    if (query.exec() && query.next()) {
-        return query.value(0).toInt();
-    }
-    return 0;
+    return SalesAnalyticsRepository(db).getTotalTransactionsToday();
 }
 
 QVector<QPair<QString, int>> Database::getTopSellingProducts(int limit)
 {
-    QVector<QPair<QString, int>> products;
-    QSqlQuery query(db);
-    query.prepare("SELECT product_name, SUM(quantity) as total_qty FROM sale_items GROUP BY product_name ORDER BY total_qty DESC LIMIT ?");
-    query.addBindValue(limit);
-    query.exec();
-    while (query.next()) {
-        products.append(qMakePair(query.value(0).toString(), query.value(1).toInt()));
-    }
-    return products;
+    return SalesAnalyticsRepository(db).getTopSellingProducts(limit);
 }
 
 bool Database::logStockAdjustment(int productId, const QString &productName,
                                   int oldQty, int newQty,
                                   const QString &reason, const QString &adjustedBy)
 {
-    QSqlQuery q(db);
-    q.prepare("INSERT INTO stock_adjustments "
-              "(product_id, product_name, change_qty, old_qty, new_qty, reason, adjusted_by) "
-              "VALUES (?, ?, ?, ?, ?, ?, ?)");
-    q.addBindValue(productId);
-    q.addBindValue(productName);
-    q.addBindValue(newQty - oldQty);
-    q.addBindValue(oldQty);
-    q.addBindValue(newQty);
-    q.addBindValue(reason);
-    q.addBindValue(adjustedBy);
-    return q.exec();
+    return ProductRepository(db).logStockAdjustment(productId, productName, oldQty, newQty, reason, adjustedBy);
 }
 
 QVector<Database::StockAdjustment> Database::getStockHistory(int productId, int limit) const
 {
-    QVector<StockAdjustment> history;
-    QSqlQuery q(db);
-    q.prepare("SELECT id, product_id, product_name, change_qty, old_qty, new_qty, "
-              "reason, adjusted_by, adjusted_at "
-              "FROM stock_adjustments WHERE product_id = ? "
-              "ORDER BY adjusted_at DESC LIMIT ?");
-    q.addBindValue(productId);
-    q.addBindValue(limit);
-    if (q.exec()) {
-        while (q.next()) {
-            StockAdjustment a;
-            a.id = q.value(0).toInt();
-            a.productId = q.value(1).toInt();
-            a.productName = q.value(2).toString();
-            a.changeQty = q.value(3).toInt();
-            a.oldQty = q.value(4).toInt();
-            a.newQty = q.value(5).toInt();
-            a.reason = q.value(6).toString();
-            a.adjustedBy = q.value(7).toString();
-            a.adjustedAt = q.value(8).toString();
-            history.append(a);
-        }
-    }
-    return history;
+    return ProductRepository(db).getStockHistory(productId, limit);
 }
 
 bool Database::processRefund(int saleId, const QString &reason, const QString &processedBy)
 {
-    if (!db.transaction()) {
-        lastError = db.lastError().text();
-        return false;
-    }
-
-    Sale sale = getSaleById(saleId);
-    if (sale.id <= 0) {
-        db.rollback();
-        lastError = QString("Sale #%1 not found").arg(saleId);
-        return false;
-    }
-
-    // Guard against double-refunds at the DB level: a second refund would
-    // insert another refund row AND restore stock again. The check lives
-    // inside the transaction so it holds even if a caller forgets to gate it.
-    if (isRefunded(saleId)) {
-        db.rollback();
-        lastError = QString("Sale #%1 has already been refunded").arg(saleId);
-        return false;
-    }
-
-    // Record refund
-    QSqlQuery q(db);
-    q.prepare("INSERT INTO refunds (sale_id, total_refunded, reason, processed_by) "
-              "VALUES (?, ?, ?, ?)");
-    q.addBindValue(saleId);
-    q.addBindValue(sale.total.cents());
-    q.addBindValue(reason);
-    q.addBindValue(processedBy);
-    if (!q.exec()) {
-        db.rollback();
-        lastError = q.lastError().text();
-        return false;
-    }
-
-    // Return items to stock + log adjustments
-    QVector<SaleItem> items = getSaleItems(saleId);
-    for (const SaleItem &item : items) {
-        if (!increaseStock(item.productId, item.quantity)) {
-            db.rollback();
-            return false;
-        }
-
-        Product p = getProductById(item.productId);
-        if (!logStockAdjustment(item.productId, item.productName,
-                                p.stockQuantity - item.quantity,
-                                p.stockQuantity,
-                                QString("Refund for Sale #%1").arg(saleId),
-                                processedBy)) {
-            db.rollback();
-            return false;
-        }
-    }
-
-    if (!db.commit()) {
-        lastError = db.lastError().text();
-        db.rollback();
-        return false;
-    }
-    return true;
+    RefundRepository repo(db);
+    const bool ok = repo.processRefund(saleId, reason, processedBy);
+    lastError = repo.lastError();
+    return ok;
 }
 
 bool Database::isRefunded(int saleId) const
 {
-    QSqlQuery q(db);
-    q.prepare("SELECT COUNT(*) FROM refunds WHERE sale_id = ?");
-    q.addBindValue(saleId);
-    if (q.exec() && q.next())
-        return q.value(0).toInt() > 0;
-    return false;
+    return RefundRepository(db).isRefunded(saleId);
 }
 
 // ==================== Suppliers ====================
@@ -1175,365 +884,96 @@ bool Database::deactivateSupplier(int id)
 // ==================== Purchase Orders ====================
 
 int Database::createPurchaseOrder(int supplierId, const QVector<PurchaseOrderItem> &items,
-                                   const QString &notes, const QString &createdBy)
+                                  const QString &notes, const QString &createdBy)
 {
-    if (items.isEmpty()) {
-        lastError = "Cannot create a purchase order with no items";
-        return -1;
-    }
-
-    if (!db.transaction()) {
-        lastError = "Failed to start transaction: " + db.lastError().text();
-        return -1;
-    }
-
-    qint64 totalCents = 0;
-    for (const PurchaseOrderItem &item : items)
-        totalCents += item.subtotal.cents();
-
-    QSqlQuery poQuery(db);
-    poQuery.prepare("INSERT INTO purchase_orders (supplier_id, status, notes, created_by, total) "
-                    "VALUES (?, 'Pending', ?, ?, ?)");
-    poQuery.addBindValue(supplierId);
-    poQuery.addBindValue(notes);
-    poQuery.addBindValue(createdBy);
-    poQuery.addBindValue(totalCents);
-    if (!poQuery.exec()) {
-        lastError = "Failed to create purchase order: " + poQuery.lastError().text();
-        db.rollback();
-        return -1;
-    }
-    const int poId = poQuery.lastInsertId().toInt();
-
-    for (const PurchaseOrderItem &item : items) {
-        QSqlQuery itemQuery(db);
-        itemQuery.prepare("INSERT INTO purchase_order_items "
-                          "(po_id, product_id, product_name, quantity, unit_cost, subtotal) "
-                          "VALUES (?, ?, ?, ?, ?, ?)");
-        itemQuery.addBindValue(poId);
-        itemQuery.addBindValue(item.productId);
-        itemQuery.addBindValue(item.productName);
-        itemQuery.addBindValue(item.quantity);
-        itemQuery.addBindValue(item.unitCost.cents());
-        itemQuery.addBindValue(item.subtotal.cents());
-        if (!itemQuery.exec()) {
-            lastError = "Failed to add purchase order item: " + itemQuery.lastError().text();
-            db.rollback();
-            return -1;
-        }
-    }
-
-    if (!db.commit()) {
-        lastError = "Failed to commit purchase order: " + db.lastError().text();
-        db.rollback();
-        return -1;
-    }
-    return poId;
-}
-
-// Shared row->struct mapping for the two list queries below (kept private to
-// this translation unit; not worth a header declaration for one-line callers).
-static PurchaseOrder poFromQuery(QSqlQuery &query)
-{
-    PurchaseOrder po;
-    po.id           = query.value(0).toInt();
-    po.supplierId   = query.value(1).toInt();
-    po.supplierName = query.value(2).toString();
-    po.status       = query.value(3).toString();
-    po.orderDate    = query.value(4).toString();
-    po.receivedDate = query.value(5).toString();
-    po.notes        = query.value(6).toString();
-    po.createdBy    = query.value(7).toString();
-    po.total        = Money::fromCents(query.value(8).toLongLong());
-    return po;
+    PurchaseOrderRepository repo(db);
+    const int ok = repo.createPurchaseOrder(supplierId, items, notes, createdBy);
+    lastError = repo.lastError();
+    return ok;
 }
 
 QVector<PurchaseOrder> Database::getAllPurchaseOrders()
 {
-    QVector<PurchaseOrder> orders;
-    QSqlQuery query(db);
-    query.exec("SELECT po.id, po.supplier_id, s.name, po.status, po.order_date, "
-              "po.received_date, po.notes, po.created_by, po.total "
-              "FROM purchase_orders po JOIN suppliers s ON s.id = po.supplier_id "
-              "ORDER BY po.order_date DESC");
-    while (query.next())
-        orders.append(poFromQuery(query));
-    return orders;
+    return PurchaseOrderRepository(db).getAllPurchaseOrders();
 }
 
 QVector<PurchaseOrder> Database::getPurchaseOrdersBySupplier(int supplierId)
 {
-    QVector<PurchaseOrder> orders;
-    QSqlQuery query(db);
-    query.prepare("SELECT po.id, po.supplier_id, s.name, po.status, po.order_date, "
-                  "po.received_date, po.notes, po.created_by, po.total "
-                  "FROM purchase_orders po JOIN suppliers s ON s.id = po.supplier_id "
-                  "WHERE po.supplier_id = ? ORDER BY po.order_date DESC");
-    query.addBindValue(supplierId);
-    if (query.exec()) {
-        while (query.next())
-            orders.append(poFromQuery(query));
-    }
-    return orders;
+    return PurchaseOrderRepository(db).getPurchaseOrdersBySupplier(supplierId);
 }
 
 PurchaseOrder Database::getPurchaseOrderById(int id)
 {
-    PurchaseOrder po;
-    QSqlQuery query(db);
-    query.prepare("SELECT po.id, po.supplier_id, s.name, po.status, po.order_date, "
-                  "po.received_date, po.notes, po.created_by, po.total "
-                  "FROM purchase_orders po JOIN suppliers s ON s.id = po.supplier_id "
-                  "WHERE po.id = ?");
-    query.addBindValue(id);
-    if (query.exec() && query.next())
-        po = poFromQuery(query);
-    return po;
+    return PurchaseOrderRepository(db).getPurchaseOrderById(id);
 }
 
 QVector<PurchaseOrderItem> Database::getPurchaseOrderItems(int poId)
 {
-    QVector<PurchaseOrderItem> items;
-    QSqlQuery query(db);
-    query.prepare("SELECT id, po_id, product_id, product_name, quantity, unit_cost, subtotal "
-                  "FROM purchase_order_items WHERE po_id = ?");
-    query.addBindValue(poId);
-    if (query.exec()) {
-        while (query.next()) {
-            PurchaseOrderItem item;
-            item.id          = query.value(0).toInt();
-            item.poId        = query.value(1).toInt();
-            item.productId   = query.value(2).toInt();
-            item.productName = query.value(3).toString();
-            item.quantity    = query.value(4).toInt();
-            item.unitCost     = Money::fromCents(query.value(5).toLongLong());
-            item.subtotal     = Money::fromCents(query.value(6).toLongLong());
-            items.append(item);
-        }
-    }
-    return items;
+    return PurchaseOrderRepository(db).getPurchaseOrderItems(poId);
 }
 
 bool Database::receivePurchaseOrder(int poId, const QString &receivedBy)
 {
-    if (!db.transaction()) {
-        lastError = "Failed to start transaction: " + db.lastError().text();
-        return false;
-    }
-
-    QSqlQuery statusQuery(db);
-    statusQuery.prepare("SELECT status FROM purchase_orders WHERE id = ?");
-    statusQuery.addBindValue(poId);
-    if (!statusQuery.exec() || !statusQuery.next()) {
-        lastError = "Purchase order not found";
-        db.rollback();
-        return false;
-    }
-    if (statusQuery.value(0).toString() != "Pending") {
-        lastError = "Purchase order is not pending — already received or cancelled";
-        db.rollback();
-        return false;
-    }
-
-    QSqlQuery itemsQuery(db);
-    itemsQuery.prepare("SELECT product_id, product_name, quantity, unit_cost "
-                       "FROM purchase_order_items WHERE po_id = ?");
-    itemsQuery.addBindValue(poId);
-    if (!itemsQuery.exec()) {
-        lastError = "Failed to read purchase order items: " + itemsQuery.lastError().text();
-        db.rollback();
-        return false;
-    }
-
-    struct Line { int productId; QString name; int qty; qint64 unitCostCents; };
-    QVector<Line> lines;
-    while (itemsQuery.next()) {
-        lines.append({ itemsQuery.value(0).toInt(), itemsQuery.value(1).toString(),
-                       itemsQuery.value(2).toInt(), itemsQuery.value(3).toLongLong() });
-    }
-
-    for (const Line &line : lines) {
-        QSqlQuery stockQuery(db);
-        stockQuery.prepare("SELECT stock_quantity FROM products WHERE id = ?");
-        stockQuery.addBindValue(line.productId);
-        if (!stockQuery.exec() || !stockQuery.next()) {
-            lastError = "Product not found: " + line.name;
-            db.rollback();
-            return false;
-        }
-        const int oldQty = stockQuery.value(0).toInt();
-        const int newQty = oldQty + line.qty;
-
-        // Receiving updates stock AND the product's cost basis to the PO's
-        // unit cost (latest-cost, not weighted-average — simple and matches
-        // how the rest of the app treats cost_price as "current cost").
-        QSqlQuery updateQuery(db);
-        updateQuery.prepare("UPDATE products SET stock_quantity = ?, cost_price = ? WHERE id = ?");
-        updateQuery.addBindValue(newQty);
-        updateQuery.addBindValue(line.unitCostCents);
-        updateQuery.addBindValue(line.productId);
-        if (!updateQuery.exec()) {
-            lastError = "Failed to update stock for " + line.name + ": " + updateQuery.lastError().text();
-            db.rollback();
-            return false;
-        }
-
-        if (!logStockAdjustment(line.productId, line.name, oldQty, newQty,
-                                QString("PO #%1 Receipt").arg(poId), receivedBy)) {
-            lastError = "Failed to log stock adjustment for " + line.name;
-            db.rollback();
-            return false;
-        }
-    }
-
-    QSqlQuery finishQuery(db);
-    finishQuery.prepare("UPDATE purchase_orders SET status = 'Received', "
-                        "received_date = CURRENT_TIMESTAMP WHERE id = ?");
-    finishQuery.addBindValue(poId);
-    if (!finishQuery.exec()) {
-        lastError = "Failed to finalize purchase order: " + finishQuery.lastError().text();
-        db.rollback();
-        return false;
-    }
-
-    if (!db.commit()) {
-        lastError = "Failed to commit purchase order receipt: " + db.lastError().text();
-        db.rollback();
-        return false;
-    }
-    return true;
+    PurchaseOrderRepository repo(db);
+    const bool ok = repo.receivePurchaseOrder(poId, receivedBy);
+    lastError = repo.lastError();
+    return ok;
 }
 
 bool Database::cancelPurchaseOrder(int poId)
 {
-    QSqlQuery query(db);
-    query.prepare("UPDATE purchase_orders SET status = 'Cancelled' WHERE id = ? AND status = 'Pending'");
-    query.addBindValue(poId);
-    if (!query.exec()) {
-        lastError = "Failed to cancel purchase order: " + query.lastError().text();
-        return false;
-    }
-    if (query.numRowsAffected() == 0) {
-        lastError = "Purchase order is not pending — cannot cancel";
-        return false;
-    }
-    return true;
+    PurchaseOrderRepository repo(db);
+    const bool ok = repo.cancelPurchaseOrder(poId);
+    lastError = repo.lastError();
+    return ok;
 }
 
 // ==================== Expense Categories ====================
 
 QVector<ExpenseCategory> Database::getAllExpenseCategories(bool includeInactive)
 {
-    QVector<ExpenseCategory> cats;
-    QSqlQuery q(db);
-    q.exec(includeInactive
-               ? "SELECT id, name, is_active FROM expense_categories ORDER BY name"
-               : "SELECT id, name, is_active FROM expense_categories WHERE is_active=1 ORDER BY name");
-    while (q.next()) {
-        ExpenseCategory c;
-        c.id       = q.value(0).toInt();
-        c.name     = q.value(1).toString();
-        c.isActive = q.value(2).toBool();
-        cats.append(c);
-    }
-    return cats;
+    return ExpenseRepository(db).getAllExpenseCategories(includeInactive);
 }
 
 bool Database::addExpenseCategory(const QString &name)
 {
-    QSqlQuery q(db);
-    q.prepare("INSERT INTO expense_categories (name) VALUES (?)");
-    q.addBindValue(name.trimmed());
-    if (!q.exec()) {
-        lastError = "Failed to add expense category: " + q.lastError().text();
-        return false;
-    }
-    return true;
+    ExpenseRepository repo(db);
+    const bool ok = repo.addExpenseCategory(name);
+    lastError = repo.lastError();
+    return ok;
 }
 
 bool Database::deactivateExpenseCategory(int id)
 {
-    QSqlQuery q(db);
-    q.prepare("UPDATE expense_categories SET is_active = 0 WHERE id = ?");
-    q.addBindValue(id);
-    if (!q.exec()) {
-        lastError = "Failed to deactivate category: " + q.lastError().text();
-        return false;
-    }
-    return true;
+    ExpenseRepository repo(db);
+    const bool ok = repo.deactivateExpenseCategory(id);
+    lastError = repo.lastError();
+    return ok;
 }
 
 // ==================== Expenses ====================
 
 bool Database::addExpense(const Expense &expense)
 {
-    QSqlQuery q(db);
-    q.prepare("INSERT INTO expenses (category_id, amount, description, date, recorded_by) "
-              "VALUES (?, ?, ?, ?, ?)");
-    q.addBindValue(expense.categoryId);
-    q.addBindValue(expense.amount.cents());
-    q.addBindValue(expense.description);
-    q.addBindValue(expense.date.toString(Qt::ISODate));
-    q.addBindValue(expense.recordedBy);
-    if (!q.exec()) {
-        lastError = "Failed to record expense: " + q.lastError().text();
-        return false;
-    }
-    return true;
+    ExpenseRepository repo(db);
+    const bool ok = repo.addExpense(expense);
+    lastError = repo.lastError();
+    return ok;
 }
-
-static Expense expenseFromQuery(QSqlQuery &q)
-{
-    Expense e;
-    e.id           = q.value(0).toInt();
-    e.categoryId   = q.value(1).toInt();
-    e.categoryName = q.value(2).toString();
-    e.amount       = Money::fromCents(q.value(3).toLongLong());
-    e.description  = q.value(4).toString();
-    e.date         = q.value(5).toDate();
-    e.recordedBy   = q.value(6).toString();
-    e.createdAt    = q.value(7).toString();
-    return e;
-}
-
-static const char *expenseJoin =
-    "SELECT e.id, e.category_id, c.name, e.amount, e.description, "
-    "       e.date, e.recorded_by, e.created_at "
-    "FROM expenses e JOIN expense_categories c ON c.id = e.category_id ";
 
 QVector<Expense> Database::getAllExpenses()
 {
-    QVector<Expense> list;
-    QSqlQuery q(db);
-    q.exec(QString(expenseJoin) + "ORDER BY e.date DESC, e.created_at DESC");
-    while (q.next())
-        list.append(expenseFromQuery(q));
-    return list;
+    return ExpenseRepository(db).getAllExpenses();
 }
 
 QVector<Expense> Database::getExpensesByDateRange(const QDate &start, const QDate &end)
 {
-    QVector<Expense> list;
-    QSqlQuery q(db);
-    q.prepare(QString(expenseJoin) + "WHERE e.date BETWEEN ? AND ? ORDER BY e.date DESC");
-    q.addBindValue(start.toString(Qt::ISODate));
-    q.addBindValue(end.toString(Qt::ISODate));
-    if (q.exec()) {
-        while (q.next())
-            list.append(expenseFromQuery(q));
-    }
-    return list;
+    return ExpenseRepository(db).getExpensesByDateRange(start, end);
 }
 
 Money Database::getTotalExpenses(const QDate &start, const QDate &end)
 {
-    QSqlQuery q(db);
-    q.prepare("SELECT COALESCE(SUM(amount), 0) FROM expenses WHERE date BETWEEN ? AND ?");
-    q.addBindValue(start.toString(Qt::ISODate));
-    q.addBindValue(end.toString(Qt::ISODate));
-    if (q.exec() && q.next())
-        return Money::fromCents(q.value(0).toLongLong());
-    return Money::fromCents(0);
+    return ExpenseRepository(db).getTotalExpenses(start, end);
 }
 
 // ==================== Customers ====================
@@ -1597,71 +1037,12 @@ QVector<Sale> Database::getCustomerPurchaseHistory(int customerId)
 QVector<Database::ProfitLossRow> Database::getProfitLossByDateRange(
     const QDate &startArg, const QDate &endArg)
 {
-    const QString start = startArg.toString(Qt::ISODate);
-    const QString end   = endArg.toString(Qt::ISODate);
-    // Revenue + COGS grouped by day from sales/sale_items
-    QMap<QString, ProfitLossRow> rows;
-
-    QSqlQuery q(db);
-    q.prepare(
-        "SELECT substr(s.sale_date,1,10) AS day, "
-        "       SUM(s.total)             AS revenue, "
-        "       SUM(si.quantity * si.cost_price) AS cogs "
-        "FROM sales s "
-        "JOIN sale_items si ON si.sale_id = s.id "
-        "WHERE substr(s.sale_date,1,10) BETWEEN ? AND ? "
-        "GROUP BY day ORDER BY day");
-    q.addBindValue(start);
-    q.addBindValue(end);
-    if (q.exec()) {
-        while (q.next()) {
-            ProfitLossRow r;
-            r.date    = q.value(0).toString();
-            r.revenue = Money::fromCents(q.value(1).toLongLong());
-            r.cogs    = Money::fromCents(q.value(2).toLongLong());
-            rows[r.date] = r;
-        }
-    }
-
-    // Expenses grouped by day
-    QSqlQuery eq(db);
-    eq.prepare(
-        "SELECT date, SUM(amount) FROM expenses "
-        "WHERE date BETWEEN ? AND ? GROUP BY date");
-    eq.addBindValue(start);
-    eq.addBindValue(end);
-    if (eq.exec()) {
-        while (eq.next()) {
-            const QString day = eq.value(0).toString();
-            rows[day].date     = day;
-            rows[day].expenses = Money::fromCents(eq.value(1).toLongLong());
-        }
-    }
-
-    QVector<ProfitLossRow> result;
-    result.reserve(rows.size());
-    for (const auto &r : std::as_const(rows))
-        result.append(r);
-    return result;
+    return SalesAnalyticsRepository(db).getProfitLossByDateRange(startArg, endArg);
 }
 
 QVector<Database::StockValuationRow> Database::getStockValuation()
 {
-    QVector<StockValuationRow> rows;
-    QSqlQuery q(db);
-    q.prepare(
-        "SELECT name, category, stock_quantity, cost_price "
-        "FROM products WHERE is_active = 1 ORDER BY category, name");
-    if (!q.exec()) return rows;
-    while (q.next()) {
-        StockValuationRow r;
-        r.productName = q.value(0).toString();
-        r.category    = q.value(1).toString();
-        r.qty         = q.value(2).toInt();
-        r.costPrice   = Money::fromCents(q.value(3).toLongLong());
-        rows.append(r);
-    }
-    return rows;
+    return ProductRepository(db).getStockValuation();
 }
 
 bool Database::redeemLoyaltyPoints(int customerId, int pointsToRedeem,
@@ -1821,44 +1202,15 @@ bool Database::verifyBackup(const QString &backupPath, QString *errorOut)
 
 Money Database::getActualGrossProfit(const QDate &startDate, const QDate &endDate)
 {
-    QSqlQuery query(db);
-    query.prepare(
-        "SELECT SUM((si.price - si.cost_price) * si.quantity) as total_profit "
-        "FROM sale_items si "
-        "JOIN sales s ON si.sale_id = s.id "
-        "WHERE DATE(s.sale_date) BETWEEN ? AND ?");
-    query.addBindValue(startDate.toString(Qt::ISODate));
-    query.addBindValue(endDate.toString(Qt::ISODate));
-    if (query.exec() && query.next()) {
-        return Money::fromCents(query.value("total_profit").toLongLong());
-    }
-    return Money();
+    return SalesAnalyticsRepository(db).getActualGrossProfit(startDate, endDate);
 }
 
 Money Database::getActualGrossProfitToday()
 {
-    QSqlQuery query(db);
-    query.prepare(
-        "SELECT SUM((si.price - si.cost_price) * si.quantity) as total_profit "
-        "FROM sale_items si "
-        "JOIN sales s ON si.sale_id = s.id "
-        "WHERE DATE(s.sale_date) = DATE('now')");
-    if (query.exec() && query.next()) {
-        return Money::fromCents(query.value("total_profit").toLongLong());
-    }
-    return Money();
+    return SalesAnalyticsRepository(db).getActualGrossProfitToday();
 }
 
 Money Database::getActualGrossProfitThisMonth()
 {
-    QSqlQuery query(db);
-    query.prepare(
-        "SELECT SUM((si.price - si.cost_price) * si.quantity) as total_profit "
-        "FROM sale_items si "
-        "JOIN sales s ON si.sale_id = s.id "
-        "WHERE strftime('%Y-%m', s.sale_date) = strftime('%Y-%m', 'now')");
-    if (query.exec() && query.next()) {
-        return Money::fromCents(query.value("total_profit").toLongLong());
-    }
-    return Money();
+    return SalesAnalyticsRepository(db).getActualGrossProfitThisMonth();
 }

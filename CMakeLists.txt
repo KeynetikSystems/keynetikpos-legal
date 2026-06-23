@@ -49,6 +49,11 @@ set(PROJECT_SOURCES
     salerepository.cpp salerepository.h
     supplierrepository.cpp supplierrepository.h
     customerrepository.cpp customerrepository.h
+    productrepository.cpp productrepository.h
+    expenserepository.cpp expenserepository.h
+    purchaseorderrepository.cpp purchaseorderrepository.h
+    refundrepository.cpp refundrepository.h
+    salesanalyticsrepository.cpp salesanalyticsrepository.h
     CartItem.h
     cart.h
     cartservice.cpp cartservice.h
@@ -294,6 +299,11 @@ if(KEYNETIK_BUILD_TESTS)
         salerepository.cpp salerepository.h
         supplierrepository.cpp supplierrepository.h
         customerrepository.cpp customerrepository.h
+        productrepository.cpp productrepository.h
+        expenserepository.cpp expenserepository.h
+        purchaseorderrepository.cpp purchaseorderrepository.h
+        refundrepository.cpp refundrepository.h
+        salesanalyticsrepository.cpp salesanalyticsrepository.h
     )
     set_target_properties(database_test PROPERTIES AUTOMOC ON)
     target_include_directories(database_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
