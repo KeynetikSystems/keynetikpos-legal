@@ -17,6 +17,7 @@
 // =============================================================================
 #include "database.h"
 #include "salerepository.h"
+#include "supplierrepository.h"
 #include "passwordhasher.h"
 #include "money.h"           // Money
 #include <QSqlQuery>
@@ -1138,93 +1139,36 @@ bool Database::isRefunded(int saleId) const
 
 QVector<Supplier> Database::getAllSuppliers(bool includeInactive)
 {
-    QVector<Supplier> suppliers;
-    QSqlQuery query(db);
-    query.exec(includeInactive
-                   ? "SELECT id, name, contact_person, phone, email, address, is_active "
-                     "FROM suppliers ORDER BY name"
-                   : "SELECT id, name, contact_person, phone, email, address, is_active "
-                     "FROM suppliers WHERE is_active = 1 ORDER BY name");
-    while (query.next()) {
-        Supplier s;
-        s.id            = query.value(0).toInt();
-        s.name          = query.value(1).toString();
-        s.contactPerson = query.value(2).toString();
-        s.phone         = query.value(3).toString();
-        s.email         = query.value(4).toString();
-        s.address       = query.value(5).toString();
-        s.isActive      = query.value(6).toBool();
-        suppliers.append(s);
-    }
-    return suppliers;
+    return SupplierRepository(db).getAllSuppliers(includeInactive);
 }
 
 Supplier Database::getSupplierById(int id)
 {
-    Supplier s;
-    QSqlQuery query(db);
-    query.prepare("SELECT id, name, contact_person, phone, email, address, is_active "
-                  "FROM suppliers WHERE id = ?");
-    query.addBindValue(id);
-    if (query.exec() && query.next()) {
-        s.id            = query.value(0).toInt();
-        s.name          = query.value(1).toString();
-        s.contactPerson = query.value(2).toString();
-        s.phone         = query.value(3).toString();
-        s.email         = query.value(4).toString();
-        s.address       = query.value(5).toString();
-        s.isActive      = query.value(6).toBool();
-    }
-    return s;
+    return SupplierRepository(db).getSupplierById(id);
 }
 
 bool Database::addSupplier(const Supplier &supplier)
 {
-    QSqlQuery query(db);
-    query.prepare("INSERT INTO suppliers (name, contact_person, phone, email, address, is_active) "
-                  "VALUES (?, ?, ?, ?, ?, ?)");
-    query.addBindValue(supplier.name);
-    query.addBindValue(supplier.contactPerson);
-    query.addBindValue(supplier.phone);
-    query.addBindValue(supplier.email);
-    query.addBindValue(supplier.address);
-    query.addBindValue(supplier.isActive);
-    if (!query.exec()) {
-        lastError = "Failed to add supplier: " + query.lastError().text();
-        return false;
-    }
-    return true;
+    SupplierRepository repo(db);
+    const bool ok = repo.addSupplier(supplier);
+    lastError = repo.lastError();
+    return ok;
 }
 
 bool Database::updateSupplier(const Supplier &supplier)
 {
-    QSqlQuery query(db);
-    query.prepare("UPDATE suppliers SET name = ?, contact_person = ?, phone = ?, "
-                  "email = ?, address = ?, is_active = ? WHERE id = ?");
-    query.addBindValue(supplier.name);
-    query.addBindValue(supplier.contactPerson);
-    query.addBindValue(supplier.phone);
-    query.addBindValue(supplier.email);
-    query.addBindValue(supplier.address);
-    query.addBindValue(supplier.isActive);
-    query.addBindValue(supplier.id);
-    if (!query.exec()) {
-        lastError = "Failed to update supplier: " + query.lastError().text();
-        return false;
-    }
-    return true;
+    SupplierRepository repo(db);
+    const bool ok = repo.updateSupplier(supplier);
+    lastError = repo.lastError();
+    return ok;
 }
 
 bool Database::deactivateSupplier(int id)
 {
-    QSqlQuery query(db);
-    query.prepare("UPDATE suppliers SET is_active = 0 WHERE id = ?");
-    query.addBindValue(id);
-    if (!query.exec()) {
-        lastError = "Failed to deactivate supplier: " + query.lastError().text();
-        return false;
-    }
-    return true;
+    SupplierRepository repo(db);
+    const bool ok = repo.deactivateSupplier(id);
+    lastError = repo.lastError();
+    return ok;
 }
 
 // ==================== Purchase Orders ====================

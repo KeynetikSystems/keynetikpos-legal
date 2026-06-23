@@ -47,6 +47,7 @@ set(PROJECT_SOURCES
     mainwindow.cpp mainwindow.h
     database.cpp database.h
     salerepository.cpp salerepository.h
+    supplierrepository.cpp supplierrepository.h
     CartItem.h
     cart.h
     cartservice.cpp cartservice.h
@@ -290,6 +291,7 @@ if(KEYNETIK_BUILD_TESTS)
         tests/database_test.cpp
         database.cpp database.h
         salerepository.cpp salerepository.h
+        supplierrepository.cpp supplierrepository.h
     )
     set_target_properties(database_test PROPERTIES AUTOMOC ON)
     target_include_directories(database_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
