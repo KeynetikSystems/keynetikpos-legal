@@ -32,12 +32,14 @@ private slots:
 
 private:
     void showRun(int runId);
+    void refreshRatesCaption();
 
     Payroll      *m_payroll;
     QTableWidget *m_empTable  { nullptr };
     QLineEdit    *m_period    { nullptr };   // yyyy-MM
     QTableWidget *m_slipTable { nullptr };
     QLabel       *m_slipTotals{ nullptr };
+    QLabel       *m_ratesCaption{ nullptr };  // "Statutory rates as of <date>"
 };
 
 #endif // PAYROLLDIALOG_H

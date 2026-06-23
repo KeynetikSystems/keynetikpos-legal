@@ -73,9 +73,16 @@ bool Payroll::initSchema()
             personal_relief INTEGER,
             nssf_rate REAL, nssf_cap INTEGER,
             shif_rate REAL, shif_min INTEGER,
-            housing_rate REAL
+            housing_rate REAL,
+            effective_date TEXT, rates_note TEXT
         )
     )")) { m_lastError = q.lastError().text(); return false; }
+
+    // Provenance columns for payroll_config tables created before they existed.
+    // SQLite has no ADD COLUMN IF NOT EXISTS, so these are best-effort (the second
+    // run simply fails harmlessly because the column is already there).
+    q.exec("ALTER TABLE payroll_config ADD COLUMN effective_date TEXT");
+    q.exec("ALTER TABLE payroll_config ADD COLUMN rates_note TEXT");
 
     return true;
 }
@@ -123,7 +130,8 @@ PayrollRates Payroll::rates() const
     PayrollRates r;   // defaults
     QSqlQuery q(m_db);
     if (q.exec("SELECT paye_band1, paye_band2, paye_band3, paye_band4, personal_relief, "
-               "nssf_rate, nssf_cap, shif_rate, shif_min, housing_rate "
+               "nssf_rate, nssf_cap, shif_rate, shif_min, housing_rate, "
+               "effective_date, rates_note "
                "FROM payroll_config WHERE id = 1") && q.next()) {
         r.payeBand1      = Money::fromCents(q.value(0).toLongLong());
         r.payeBand2      = Money::fromCents(q.value(1).toLongLong());
@@ -135,6 +143,9 @@ PayrollRates Payroll::rates() const
         r.shifRate       = q.value(7).toDouble();
         r.shifMin        = Money::fromCents(q.value(8).toLongLong());
         r.housingRate    = q.value(9).toDouble();
+        // Keep the compiled-in default when a legacy row has no provenance yet.
+        if (!q.value(10).toString().isEmpty()) r.effectiveDate = q.value(10).toString();
+        if (!q.value(11).toString().isEmpty()) r.ratesNote     = q.value(11).toString();
     }
     return r;
 }
@@ -144,8 +155,9 @@ bool Payroll::saveRates(const PayrollRates &r)
     QSqlQuery q(m_db);
     q.prepare("INSERT OR REPLACE INTO payroll_config "
               "(id, paye_band1, paye_band2, paye_band3, paye_band4, personal_relief, "
-              " nssf_rate, nssf_cap, shif_rate, shif_min, housing_rate) "
-              "VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)");
+              " nssf_rate, nssf_cap, shif_rate, shif_min, housing_rate, "
+              " effective_date, rates_note) "
+              "VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)");
     q.addBindValue(r.payeBand1.cents());
     q.addBindValue(r.payeBand2.cents());
     q.addBindValue(r.payeBand3.cents());
@@ -156,6 +168,8 @@ bool Payroll::saveRates(const PayrollRates &r)
     q.addBindValue(r.shifRate);
     q.addBindValue(r.shifMin.cents());
     q.addBindValue(r.housingRate);
+    q.addBindValue(r.effectiveDate);
+    q.addBindValue(r.ratesNote);
     if (!q.exec()) { m_lastError = q.lastError().text(); return false; }
     return true;
 }

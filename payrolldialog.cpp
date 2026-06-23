@@ -72,6 +72,15 @@ PayrollDialog::PayrollDialog(Payroll *payroll, QWidget *parent)
     connect(ratesBtn, &QPushButton::clicked, this, &PayrollDialog::editRates);
     empBtns->addWidget(ratesBtn);
     empLay->addLayout(empBtns);
+
+    // Show how current the statutory figures are, so users know the payslips
+    // reflect a known rate set (and when it was last updated).
+    m_ratesCaption = new QLabel();
+    m_ratesCaption->setProperty("textScale", "sm");
+    m_ratesCaption->setProperty("kind", "muted");
+    empLay->addWidget(m_ratesCaption);
+    refreshRatesCaption();
+
     root->addWidget(empGroup);
 
     // ── Run ────────────────────────────────────────────────────────────────────
@@ -270,6 +279,9 @@ void PayrollDialog::editRates()
     auto *nssfR = pctSpin(r.nssfRate); auto *nssfCap = bandSpin(r.nssfCap);
     auto *shifR = pctSpin(r.shifRate); auto *shifMin = bandSpin(r.shifMin);
     auto *houseR = pctSpin(r.housingRate);
+    auto *effDate = new QLineEdit(r.effectiveDate);  // ISO date these took effect
+    effDate->setPlaceholderText("yyyy-MM-dd");
+    auto *srcNote = new QLineEdit(r.ratesNote);
 
     form->addRow("PAYE band 1 upper (10%):", b1);
     form->addRow("PAYE band 2 upper (25%):", b2);
@@ -281,8 +293,12 @@ void PayrollDialog::editRates()
     form->addRow("SHIF rate:", shifR);
     form->addRow("SHIF minimum:", shifMin);
     form->addRow("Housing levy rate:", houseR);
+    form->addRow("Effective date:", effDate);
+    form->addRow("Source note:", srcNote);
 
-    auto *note = new QLabel("Verify against the current KRA / Finance Act figures.");
+    auto *note = new QLabel("Verify against the current KRA / Finance Act figures, "
+                            "and update the effective date when you change a rate. "
+                            "See docs/STATUTORY_RATES.md.");
     note->setProperty("kind", "secondary");
     note->setWordWrap(true);
     form->addRow(note);
@@ -303,5 +319,16 @@ void PayrollDialog::editRates()
     r.shifRate = shifR->value() / 100.0;
     r.shifMin  = Money::fromMajor(shifMin->value());
     r.housingRate = houseR->value() / 100.0;
+    r.effectiveDate = effDate->text().trimmed();
+    r.ratesNote     = srcNote->text().trimmed();
     m_payroll->saveRates(r);
+    refreshRatesCaption();
+}
+
+void PayrollDialog::refreshRatesCaption()
+{
+    if (!m_ratesCaption) return;
+    const PayrollRates r = m_payroll->rates();
+    m_ratesCaption->setText(QString("Statutory rates effective %1 — %2")
+                                .arg(r.effectiveDate, r.ratesNote));
 }

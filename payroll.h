@@ -51,6 +51,17 @@ struct PayrollRates {
     double nssfRate    = 0.06;  Money nssfCap = Money::fromCents(3600000); // 6% of pensionable, cap 36,000
     double shifRate    = 0.0275; Money shifMin = Money::fromCents(30000);  // 2.75%, min 300
     double housingRate = 0.015;                                            // 1.5%
+
+    // ── Provenance (so users can see how current the rates are) ───────────────
+    // effectiveDate is the ISO date the CURRENT set took effect; ratesNote names
+    // the source. Both are shown in the Payroll dialog + on payslips and are
+    // persisted with the rates, so an in-app edit can be re-stamped. ALWAYS bump
+    // effectiveDate when you change a rate. See docs/STATUTORY_RATES.md for the
+    // line-by-line sources and the update checklist.
+    QString effectiveDate = "2024-10-01";
+    QString ratesNote =
+        "Finance Act 2023 PAYE bands; NSSF enhanced (2024); "
+        "SHIF 2.75% (Oct 2024); Housing Levy 1.5%";
 };
 
 struct Payslip {
