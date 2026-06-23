@@ -96,7 +96,18 @@ VatDialog::VatDialog(Vat *vat, QWidget *parent)
     m_prodTable->setColumnCount(2);
     m_prodTable->setHorizontalHeaderLabels({ "Product", "Tax Code" });
     m_prodTable->horizontalHeader()->setSectionResizeMode(0, QHeaderView::Stretch);
+    // Fixed, comfortably wide column for the tax-code picker so the labels fit.
+    m_prodTable->horizontalHeader()->setSectionResizeMode(1, QHeaderView::Fixed);
+    m_prodTable->setColumnWidth(1, 180);
     m_prodTable->setEditTriggers(QAbstractItemView::NoEditTriggers);
+    // The row-number gutter and full-row selection add noise on a settings grid;
+    // each row's only action is its own combo. Taller rows so the styled combos
+    // (padding + 2px border) aren't vertically clipped — which made them look
+    // like empty boxes.
+    m_prodTable->verticalHeader()->setVisible(false);
+    m_prodTable->verticalHeader()->setDefaultSectionSize(42);
+    m_prodTable->setSelectionMode(QAbstractItemView::NoSelection);
+    m_prodTable->setFocusPolicy(Qt::NoFocus);
     codeLay->addWidget(m_prodTable);
     tabs->addTab(codeTab, "Product Tax Codes");
 
@@ -169,6 +180,13 @@ void VatDialog::refreshProducts()
         connect(combo, &QComboBox::currentIndexChanged, this, [this, combo, id]() {
             m_vat->setProductTaxCode(id, TaxCode(combo->currentData().toInt()));
         });
-        m_prodTable->setCellWidget(r, 1, combo);
+
+        // Wrap so the combo has a little breathing room inside the cell rather
+        // than butting against the grid lines.
+        auto *cell = new QWidget();
+        auto *cellLay = new QHBoxLayout(cell);
+        cellLay->setContentsMargins(6, 4, 6, 4);
+        cellLay->addWidget(combo);
+        m_prodTable->setCellWidget(r, 1, cell);
     }
 }
