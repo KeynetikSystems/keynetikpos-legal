@@ -4,6 +4,9 @@
 CREATE TABLE IF NOT EXISTS keys (
     key         TEXT PRIMARY KEY,
     max_devices INTEGER NOT NULL DEFAULT 1,
+    tier        INTEGER NOT NULL DEFAULT 1,             -- 1 POS Core .. 4 ERP Full
+    features    TEXT,                                   -- optional JSON array of feature
+                                                        --   slugs; NULL = derive from tier
     revoked     INTEGER NOT NULL DEFAULT 0,
     expires_at  TEXT,                                   -- ISO date or NULL = perpetual
     note        TEXT,                                   -- e.g. customer name

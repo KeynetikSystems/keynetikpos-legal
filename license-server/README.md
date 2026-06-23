@@ -9,11 +9,21 @@ expected load), with HTTPS included and nothing to patch or monitor.
 
 | Endpoint | Called by | Returns |
 |---|---|---|
-| `GET /activate?key=&device_id=&device_name=` | `LicenseManager::activateOnServer()` when the user enters a CD key | `{"valid":true}` or `{"valid":false,"reason":"invalid_key\|key_revoked\|key_expired\|device_limit_reached"}` |
-| `GET /validate?key=&device_id=` | `LicenseManager::startOnlineHeartbeat()` ~2 s after every launch | `{"valid":true}` or `{"valid":false,"reason":...}` |
+| `GET /activate?key=&device_id=&device_name=` | `LicenseManager::activateOnServer()` when the user enters a CD key | `{"valid":true,"tier":N,"features":[...]?}` or `{"valid":false,"reason":"invalid_key\|key_revoked\|key_expired\|device_limit_reached"}` |
+| `GET /validate?key=&device_id=` | `LicenseManager::startOnlineHeartbeat()` ~2 s after every launch | `{"valid":true,"tier":N,"features":[...]?}` or `{"valid":false,"reason":...}` |
 
 The `reason` strings `device_limit_reached`, `key_revoked`, and `key_expired`
 are pattern-matched by the client — do not rename them.
+
+**Tier (plan):** every key carries a `tier` (1 POS Core, 2 POS Pro, 3 ERP Lite,
+4 ERP Full; default 1). `/activate` and `/validate` return it, the client
+persists it, and feature menus are gated on it. Set the tier when minting/
+registering (`/admin/keys`, `/admin/generate`, `New-License -Tier`) or selling
+(`/admin/sell`); self-serve M-Pesa purchases map the amount paid to a tier via
+`tierForAmount()` in `src/index.js` (adjust those thresholds to your pricing).
+The optional `features` column is a JSON slug array that overrides the
+tier-derived default for a single key. **Existing deployments must apply
+`migrations/0001_add_tier.sql` once** (keys default to tier 1 until updated).
 
 Client behaviour to keep in mind:
 

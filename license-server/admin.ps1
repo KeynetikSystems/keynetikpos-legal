@@ -10,7 +10,7 @@
 #
 # Usage:
 #   . .\admin.ps1                              # dot-source to load the functions
-#   New-License -Key "ABCD-1F2E-WXYZ-9876" -MaxDevices 2 -Note "Mama Njeri, Nakuru"
+#   New-License -Key "ABCD-1F2E-WXYZ-9876" -Tier 3 -MaxDevices 2 -Note "Mama Njeri, Nakuru"
 #   Get-Licenses
 #   Revoke-License -Key "ABCD-1F2E-WXYZ-9876"
 # =============================================================================
@@ -23,12 +23,13 @@ function New-License {
     param(
         [Parameter(Mandatory)][string]$Key,
         [int]$MaxDevices = 1,
+        [ValidateRange(1,4)][int]$Tier = 1,   # 1 POS Core .. 4 ERP Full
         [string]$ExpiresAt,            # e.g. "2027-01-01" — omit for perpetual
         [string]$Note,
         [string]$BaseUrl = $script:BaseUrl,
         [string]$Token   = $script:Token
     )
-    $body = @{ key = $Key; max_devices = $MaxDevices }
+    $body = @{ key = $Key; max_devices = $MaxDevices; tier = $Tier }
     if ($ExpiresAt) { $body.expires_at = $ExpiresAt }
     if ($Note)      { $body.note       = $Note }
     Invoke-RestMethod -Method Post -Uri "$BaseUrl/admin/keys" `
@@ -55,5 +56,5 @@ function Get-Licenses {
     )
     (Invoke-RestMethod -Method Get -Uri "$BaseUrl/admin/list" `
         -Headers @{ Authorization = "Bearer $Token" }).keys |
-        Format-Table key, devices_used, max_devices, revoked, expires_at, note -AutoSize
+        Format-Table key, tier, devices_used, max_devices, revoked, expires_at, note -AutoSize
 }

@@ -6,9 +6,11 @@
 //   GET  /validate?key=&device_id=
 //
 // Admin endpoints (Bearer ADMIN_TOKEN):
-//   POST /admin/keys        body: { key, max_devices?, expires_at?, note? }
-//   POST /admin/generate    body: { max_devices?, expires_at?, note? }
-//   POST /admin/sell        body: { customer, email?, max_devices? }
+//   POST /admin/keys        body: { key, max_devices?, tier?, expires_at?, note? }
+//   POST /admin/generate    body: { max_devices?, tier?, expires_at?, note? }
+//   POST /admin/sell        body: { customer, email?, max_devices?, tier? }
+//   ( tier: 1 POS Core .. 4 ERP Full; defaults to 1. /activate + /validate
+//     return { valid, tier, features? } so the client unlocks the right plan. )
 //   POST /admin/revoke?key=XXXX-...
 //   GET  /admin/list
 //
@@ -74,9 +76,30 @@ function formatKey(raw16) {
   return `${raw16.slice(0,4)}-${raw16.slice(4,8)}-${raw16.slice(8,12)}-${raw16.slice(12,16)}`;
 }
 
+// The entitlement payload returned by /activate and /validate. The client reads
+// `tier` (defaulting to 1) and applies it; `features` is only sent when a key
+// carries an explicit override, otherwise the client derives the feature list
+// from the tier.
+function entitlement(row) {
+  const out = { valid: true, tier: row.tier ?? 1 };
+  if (row.features) {
+    try { out.features = JSON.parse(row.features); } catch { /* ignore bad JSON */ }
+  }
+  return out;
+}
+
+// Maps a paid amount (whole KES) to a plan tier for self-serve M-Pesa purchases.
+// ADJUST THESE THRESHOLDS to your pricing — they are the price list, in code.
+function tierForAmount(kes) {
+  if (kes >= 15000) return 4;   // ERP Full
+  if (kes >= 7000)  return 3;   // ERP Lite
+  if (kes >= 3000)  return 2;   // POS Pro
+  return 1;                     // POS Core
+}
+
 // ── Stock assignment (shared by /admin/sell and /webhook/mpesa) ───────────────
 
-async function assignNextKey(db, note, maxDevices = 1) {
+async function assignNextKey(db, note, maxDevices = 1, tier = 1) {
   const row = await db.prepare(
     `SELECT k.key FROM keys k
      LEFT JOIN activations a ON a.key = k.key
@@ -90,8 +113,8 @@ async function assignNextKey(db, note, maxDevices = 1) {
 
   if (!row) return null;
 
-  await db.prepare("UPDATE keys SET note = ?, max_devices = ? WHERE key = ?")
-    .bind(note, maxDevices, row.key)
+  await db.prepare("UPDATE keys SET note = ?, max_devices = ?, tier = ? WHERE key = ?")
+    .bind(note, maxDevices, tier, row.key)
     .run();
 
   return formatKey(row.key);
@@ -303,7 +326,7 @@ export default {
           "INSERT INTO activations (key, device_id, device_name) VALUES (?, ?, ?)",
         ).bind(key, deviceId, devName).run();
       }
-      return json({ valid: true });
+      return json(entitlement(row));
     }
 
     // ── GET /validate (heartbeat) ─────────────────────────────────
@@ -321,7 +344,7 @@ export default {
       ).bind(key, deviceId).first();
       if (!act) return json({ valid: false, reason: "not_activated" });
 
-      return json({ valid: true });
+      return json(entitlement(row));
     }
 
     // ── POST /pos/mpesa/stkpush ───────────────────────────────────
@@ -490,7 +513,9 @@ export default {
       const note    = customerName
         ? `${customerName} (${phone}) via M-Pesa ${txId}`
         : `${phone} via M-Pesa ${txId}`;
-      const plainKey = await assignNextKey(env.DB, note, 1);
+      // The amount paid picks the plan tier (see tierForAmount).
+      const paidTier = tierForAmount(Number(amount) || 0);
+      const plainKey = await assignNextKey(env.DB, note, 1, paidTier);
 
       if (!plainKey) {
         // Out of stock — log loudly; Daraja won't retry (we return 0)
@@ -591,15 +616,17 @@ export default {
         if (key.length !== 16) return json({ error: "bad key" }, 400);
 
         await env.DB.prepare(
-          `INSERT INTO keys (key, max_devices, revoked, expires_at, note)
-           VALUES (?, ?, 0, ?, ?)
+          `INSERT INTO keys (key, max_devices, tier, revoked, expires_at, note)
+           VALUES (?, ?, ?, 0, ?, ?)
            ON CONFLICT(key) DO UPDATE SET
              max_devices = excluded.max_devices,
+             tier        = excluded.tier,
              expires_at  = excluded.expires_at,
              note        = excluded.note`,
-        ).bind(key, body?.max_devices ?? 1, body?.expires_at ?? null, body?.note ?? null).run();
+        ).bind(key, body?.max_devices ?? 1, body?.tier ?? 1,
+               body?.expires_at ?? null, body?.note ?? null).run();
 
-        return json({ ok: true, key });
+        return json({ ok: true, key, tier: body?.tier ?? 1 });
       }
 
       // POST /admin/generate — mint + register in one step
@@ -608,11 +635,12 @@ export default {
         const { plain, norm: key } = await mintKey();
 
         await env.DB.prepare(
-          `INSERT INTO keys (key, max_devices, revoked, expires_at, note)
-           VALUES (?, ?, 0, ?, ?)`,
-        ).bind(key, body.max_devices ?? 1, body.expires_at ?? null, body.note ?? null).run();
+          `INSERT INTO keys (key, max_devices, tier, revoked, expires_at, note)
+           VALUES (?, ?, ?, 0, ?, ?)`,
+        ).bind(key, body.max_devices ?? 1, body.tier ?? 1,
+               body.expires_at ?? null, body.note ?? null).run();
 
-        return json({ ok: true, key: plain });
+        return json({ ok: true, key: plain, tier: body.tier ?? 1 });
       }
 
       // POST /admin/sell — assign next unsold key to a named customer
@@ -621,12 +649,12 @@ export default {
         if (!body?.customer) return json({ error: "customer field required" }, 400);
 
         const note     = body.email ? `${body.customer} <${body.email}>` : body.customer;
-        const plainKey = await assignNextKey(env.DB, note, body.max_devices ?? 1);
+        const plainKey = await assignNextKey(env.DB, note, body.max_devices ?? 1, body.tier ?? 1);
 
         if (!plainKey)
           return json({ error: "no_stock", message: "No unsold keys. Use POST /admin/generate." }, 409);
 
-        return json({ ok: true, key: plainKey, customer: note });
+        return json({ ok: true, key: plainKey, customer: note, tier: body.tier ?? 1 });
       }
 
       // POST /admin/revoke?key=XXXX-...
@@ -639,7 +667,7 @@ export default {
       // GET /admin/list
       if (url.pathname === "/admin/list" && request.method === "GET") {
         const { results } = await env.DB.prepare(
-          `SELECT k.key, k.max_devices, k.revoked, k.expires_at, k.note,
+          `SELECT k.key, k.max_devices, k.tier, k.revoked, k.expires_at, k.note,
                   k.created_at, COUNT(a.device_id) AS devices_used
            FROM keys k LEFT JOIN activations a ON a.key = k.key
            GROUP BY k.key ORDER BY k.created_at DESC`,
