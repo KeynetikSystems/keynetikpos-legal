@@ -8,26 +8,47 @@ source file and the classes it contains: **what** it does, **how** it does it, a
 Architecture at a glance:
 
 ```
-main.cpp ──► AntiDebug ──► LicenseManager ──► Database ──► LoginDialog/UserManager ──► MainWindow
-                                                                                          │
-              ┌───────────────┬───────────────┬──────────────┬────────────┬──────────────┤
-              ▼               ▼               ▼              ▼            ▼              ▼
-       InventoryManager  ReceiptPrinter  ScheduleManager SettingsManager BarcodeReader  Dialogs
-                                              │
-                                    MessageProvider (abstract)
-                                    ├── WhatsAppManager (Twilio)
-                                    └── AfricasTalkingProvider (SMS)
+main.cpp ─► AntiDebug ─► LicenseManager ─► Database (owned here) ─► LoginDialog/UserManager ─► MainWindow(Database&)
+                                               │                                                     │
+                          delegates to         ▼                  ┌──────────┬──────────┬───────────┼───────────┬──────────┐
+                    ┌── SaleRepository          repositories       ▼          ▼          ▼           ▼           ▼          ▼
+                    ├── ProductRepository                   InventoryManager ReceiptPrinter ScheduleManager SettingsManager BarcodeReader Dialogs
+                    ├── CustomerRepository                                          │             (each receives the Database&)
+                    ├── SupplierRepository                              MessageProvider (abstract)
+                    ├── ExpenseRepository                               ├── WhatsAppManager (Twilio)
+                    ├── PurchaseOrderRepository                         └── AfricasTalkingProvider (SMS)
+                    ├── RefundRepository
+                    └── SalesAnalyticsRepository
+
+Accounting/ERP layer (Tier 4): Ledger (double-entry GL) ◄─ SaleJournal builds balanced
+entries; Payroll, Vat, Etims post into the same QSqlDatabase connection.
 ```
+
+`main()` owns the one `Database`; it is injected by reference down the tree. The
+data API delegates to the repositories on the left; the accounting modules
+(`Ledger`/`Payroll`/`Vat`) take the shared `QSqlDatabase` directly.
 
 Conventions used throughout the codebase:
 
-- **Singletons** (`Database`, `UserManager`, `LicenseManager`, `ThemeManager`) for
-  process-wide services that must have exactly one instance.
+- **Dependency injection for the database.** `Database` is *not* a singleton: a
+  single instance is created in `main()`, owned for the life of the process, and
+  passed by reference (`Database&`) into `MainWindow`, which forwards it to every
+  dialog/manager/service it constructs. (`UserManager`, `LicenseManager`, and
+  `ThemeManager` remain singletons.)
+- **Repository layer.** `Database` itself holds no business SQL — it is a thin
+  facade over per-aggregate repositories (`SaleRepository`,
+  `ProductRepository`, `CustomerRepository`, `SupplierRepository`,
+  `ExpenseRepository`, `PurchaseOrderRepository`, `RefundRepository`,
+  `SalesAnalyticsRepository`). Each takes a `QSqlDatabase` by value (like
+  `Ledger`) and owns the queries for one slice. See §2.
 - **Manager classes** (`QObject` subclasses) hold business logic and persistence;
   **Dialog classes** (`QDialog` subclasses) hold UI only and delegate to managers.
-- Each manager creates its own SQLite tables on construction
-  (`createTableIfNotExist()`), so the schema is self-bootstrapping — no separate
-  migration tool is needed for a single-machine POS install.
+- **Money is integer cents** everywhere via the `Money` value type (`money.h`),
+  never floating point — see §2.
+- **Versioned schema migrations.** The schema is self-bootstrapping
+  (`CREATE TABLE IF NOT EXISTS`) and upgraded in place by a numbered migration
+  runner keyed on a `schema_meta` version row — no separate migration tool is
+  needed for a single-machine POS install.
 - All SQL uses prepared statements with bound values to prevent SQL injection.
 
 ---
@@ -73,12 +94,6 @@ users (slow machines, virtualized POS terminals, IT diagnostic tools) far more
 often than they stopped crackers. The vague error message avoids telling an
 attacker which check fired.
 
-### xdebug.h
-
-**What:** An empty header (include guard only). Dead file — likely a leftover
-placeholder from a removed debug utility. Safe to delete; it is not referenced by
-`CMakeLists.txt`.
-
 ### licensemanager.h / licensemanager.cpp — `LicenseManager`
 
 **What:** Singleton that enforces the licensing model: a 30-day trial
@@ -115,39 +130,89 @@ with the correct machine-bound signature. The server URL is a placeholder
 
 ## 2. Data layer
 
-### database.h / database.cpp — `Database`, `Product`, `Sale`, `SaleItem`
+### money.h — `Money`
 
-**What:** The central persistence layer. A singleton wrapping a single SQLite
-connection, plus the three core data structs: `Product` (catalog item with price,
-cost, margin, stock, barcode), `Sale` (transaction header), and `SaleItem` (line
-item snapshot). Provides product CRUD, stock operations, atomic sale recording,
-sales queries, refunds, stock-adjustment audit logging, and profit analytics.
+**What:** The single currency type used across the whole app — an exact amount
+in integer minor units (cents), plus the configurable currency symbol and
+`formatMoney()`.
+
+**How:** A value type wrapping a `qint64` cent count. Conversions to/from the
+outside world are *explicit* (`fromCents`/`fromMajor`, `cents()`/`toMajor()`) so
+a stray `double` can never silently become money. The only float involved is
+`fromMajor()`'s round-half-away conversion at UI input, and tax-rate
+multiplication.
+
+**Why:** Doubles cannot represent money exactly (`0.1 + 0.2 != 0.3`), which for a
+POS is a latent liability — totals that don't reconcile, unsafe `==`, drift that
+compounds over a day's sales. Integer cents are exact; rounding happens once,
+deliberately, at the edge.
+
+### database.h / database.cpp — `Database` + the core data structs
+
+**What:** The persistence layer's connection holder and public facade. Defines
+the data structs — `Product`, `Sale`, `SaleItem`, `SalePayment`, `SaleRequest`,
+`Supplier`, `PurchaseOrder`/`PurchaseOrderItem`, `Expense`/`ExpenseCategory`,
+`Customer` — and exposes the full data API (product/stock, sales, refunds,
+suppliers, purchase orders, expenses, customers, analytics, backup). All money
+fields are `Money`; all date fields are typed (`QDateTime`/`QDate`). `Sale`
+carries `cashier` and `shiftId` audit context.
 
 **How:**
-- The constructor resolves a per-user data directory via
-  `QStandardPaths::AppDataLocation` (falling back to the executable directory)
-  and opens `pos_database.db` there. `initialize()` turns on
-  `PRAGMA foreign_keys`, creates all tables idempotently
-  (`CREATE TABLE IF NOT EXISTS`), and seeds sample products on a fresh database.
-- `ensureColumn()` performs lightweight schema migration by adding missing
-  columns to existing tables, so upgrades don't break old databases.
-- **`recordSale()` is the heart of checkout:** inside a single SQL transaction it
-  (1) re-validates stock for every line item, (2) inserts the `sales` row,
-  (3) inserts each `sale_items` row — including a *snapshot* of product name,
-  price, and cost price — and (4) decrements `products.stock_quantity`. Any
-  failure rolls the whole thing back and returns −1 with `getLastError()` set.
-- `adjustStockWithLog()` wraps manual stock changes and the audit-log insert in
-  one transaction. `processRefund()` and `isRefunded()` handle refund records.
-- Profit queries (`getActualGrossProfit*`) compute `(price − cost_price) × qty`
-  from the stored `sale_items` snapshots.
+- **Not a singleton.** A single `Database` is constructed in `main()` and
+  injected by reference everywhere (see Conventions). The constructor resolves a
+  per-user data directory via `QStandardPaths::AppDataLocation` (falling back to
+  the executable dir) and opens `pos_database.db`. `configureForTesting()`
+  repoints it at an in-memory/file connection so tests own their own instance.
+- `initialize()` enables `PRAGMA foreign_keys`/WAL/busy_timeout, creates all
+  tables idempotently, runs the versioned migrations, then the one-time
+  money-to-cents data conversion, and seeds sample data on a fresh DB.
+- **Versioned migrations:** `runMigrations()` applies each numbered step newer
+  than the `schema_meta` `schema_version` row, each in its own transaction and
+  written idempotently (via `ensureColumn()`), so a fresh DB and an old DB
+  converge on the same schema. The money-to-cents conversion is kept separate
+  and marker-gated so it can never re-run.
+- **Thin facade.** `Database` holds no business SQL of its own — every data
+  method delegates to a repository (e.g. `recordSale()` →
+  `SaleRepository(db).recordSale()`), propagating `lastError()` on writes. This
+  keeps the public API (and its ~120 call sites) stable while the query logic
+  lives in focused, separately-testable units.
 
-**Why:** The singleton guarantees one connection and one schema bootstrap path.
-Stock validation *inside* the transaction is what makes concurrent overselling
-impossible — checking stock in the UI first would be a race. Sale items snapshot
-name/price/cost at sale time because products get renamed, repriced, or deleted
-later; historical reports and profit math must reflect what was actually charged.
-The AppData location keeps the database out of `Program Files`, which is
-read-only for non-admin users on Windows.
+**Why:** Injecting one owned connection (rather than a global accessor) makes
+dependencies explicit and the data layer testable and multi-DB-capable. The
+repository split keeps each aggregate's SQL cohesive and reviewable. Typed money
+and dates push correctness to the type system. Stock validation *inside*
+`recordSale`'s transaction makes concurrent overselling impossible; sale items
+snapshot name/price/cost because products get renamed/repriced/deleted later and
+historical reports must reflect what was actually charged.
+
+### Repository layer — `*repository.h` / `*repository.cpp`
+
+**What:** Eight classes that own the read/write SQL for one aggregate each,
+extracted from what used to be the `Database` "god object":
+
+| Repository | Owns |
+|---|---|
+| `SaleRepository` | `recordSale()` (the atomic checkout write) + the `Sale`/`SaleItem` queries |
+| `ProductRepository` | catalog CRUD, stock mutators, `adjustStockWithLog`, stock history + valuation |
+| `CustomerRepository` | customer CRUD, phone lookup, store-credit/loyalty adjustments |
+| `SupplierRepository` | supplier CRUD (soft delete) |
+| `ExpenseRepository` | expense categories + expenses + date-range totals |
+| `PurchaseOrderRepository` | PO CRUD + the transactional `receivePurchaseOrder` |
+| `RefundRepository` | `processRefund`/`isRefunded` |
+| `SalesAnalyticsRepository` | takings, top sellers, payment totals, gross profit, P&L |
+
+**How:** Each takes a `QSqlDatabase` *by value* (a cheap ref-counted handle to
+the one open connection — the same pattern as `Ledger`), so it shares
+`Database`'s connection and any in-flight transaction without owning it.
+Cross-aggregate operations compose: `RefundRepository::processRefund` reuses
+`SaleRepository` + `ProductRepository`, and `PurchaseOrderRepository::
+receivePurchaseOrder` reuses `ProductRepository` for the per-line audit log, all
+on the same connection inside one transaction.
+
+**Why:** A single class owning the entire ERP persistence layer was the codebase's
+biggest structural debt. One repository per aggregate makes each slice cohesive,
+independently testable, and safe to extend without touching the others; the
+`Database` facade keeps every existing call site working.
 
 ### CartItem.h — `CartItem`
 
@@ -306,15 +371,9 @@ source of truth. Stock is only *validated* in the UI but *enforced* in
 gives correctness. Permission-driven UI disabling complements (not replaces) the
 role checks in managers.
 
-### mainwindow.ui / analyticsdialog.ui
-
-**What:** Qt Designer XML layouts.
-
-**How/Why:** Both are vestigial — `MainWindow` and `AnalyticsDialog` build their
-UIs programmatically (the code comments say so explicitly: "no .ui file needed").
-They remain in the tree but the runtime look comes from the `setupUi()` C++
-methods, which made dynamic theming (light/dark restyling at runtime) easier than
-static Designer stylesheets.
+> **Note:** every screen builds its UI programmatically in `setupUI()`; there are
+> no Qt Designer `.ui` files. This makes runtime theming (light/dark restyling)
+> straightforward and keeps layout logic next to the code that drives it.
 
 ---
 
@@ -463,21 +522,6 @@ dialog that calls `restockProduct()`.
 low-stock warning shouldn't require navigating a four-tab workbench — this is the
 one-click triage view MainWindow opens from alerts.
 
-### stockmanager.h / stockmanager.cpp — `StockManager`
-
-**What:** An alternative single-screen stock management dialog: toolbar
-(refresh / add / edit / delete / restock / adjust / export CSV), filterable
-product table, and a summary strip (counts by status, total stock value).
-
-**How:** Same pattern as the other inventory UIs — loads `InventoryInfo` rows
-through `InventoryManager`, filters in memory, edits via small modal dialogs, and
-logs adjustments through `Database::adjustStockWithLog()` so every manual change
-has an audit row.
-
-**Why:** Functionally overlaps `InventoryDialog`; it survives as a simpler,
-dialog-driven alternative (modal forms instead of in-place grid editing). A
-future cleanup could consolidate the two.
-
 ---
 
 ## 7. Barcode scanning
@@ -597,80 +641,25 @@ the choice survive restarts.
 
 ## 9. Analytics & reporting
 
-The app has three generations of analytics UI (all kept in the build) plus one
-query engine:
-
-### analyticsmanager.h / analyticsmanager.cpp — `AnalyticsManager`
-
-**What:** The analytics *query engine* — no UI. Computes daily/hourly sales
-series, top/bottom sellers, per-category breakdowns with percentages, revenue for
-arbitrary ranges, average transaction value, peak business hours, period-over-
-period growth rates, trend commentary, and a `DashboardSummary` aggregate (today/
-yesterday/week/month revenue, top product/category, peak hours, growth).
-
-**How:** Each method is a parameterized SQL aggregate over `sales`/`sale_items`
-(SUM/COUNT/GROUP BY with `strftime` bucketing for hours and days), returning
-small structs (`DailySalesStats`, `HourlySalesStats`, `ProductSalesStats`,
-`CategoryStats`, `PeakHourInfo`). It holds only a reference to the externally
-owned `QSqlDatabase`. `refreshAnalytics()` emits `analyticsUpdated` for UI
-listeners.
-
-**Why:** Letting SQLite do the aggregation is both faster and simpler than
-loading rows into C++ and looping. Keeping computation UI-free means the same
-numbers feed `AnalyticsDialog`, scheduled SMS reports, and anything added later —
-one definition of "today's revenue" everywhere.
-
-### analyticsdialog.h / analyticsdialog.cpp — `AnalyticsDialog`
-
-**What:** The primary analytics screen: revenue cards (today vs yesterday with
-change indicator, week, month, growth), transaction stats, and tabbed rich-text
-views for top products (with medals), category breakdown, peak hours, and a
-zero-sales warning list with suggested actions.
-
-**How:** Builds its UI in code and renders sections as themed HTML inside
-`QTextBrowser`s — dozens of small `build*`/`get*Style` helpers assemble HTML
-fragments coloured from the active `ColorScheme`. A period combo (7/30/90 days…)
-re-runs all `AnalyticsManager` queries; it listens for `themeChanged` and
-re-renders on theme switches.
-
-**Why:** HTML-in-`QTextBrowser` gives rich, styled report layouts without taking
-a dependency on Qt Charts; regenerating from data on each refresh keeps the view
-stateless and theme switching trivial.
+Analytics queries live in `SalesAnalyticsRepository` (see §2); the UIs below
+present them. (Three earlier overlapping analytics screens — `AnalyticsManager`,
+`AnalyticsDialog`, and `EnhancedAnalyticsDialog` — were removed in a
+consolidation pass; `AnalyticsDashboard` is the surviving dashboard.)
 
 ### analyticsdashboard.h / analyticsdashboard.cpp — `AnalyticsDashboard`
 
-**What:** A second dashboard variant: date-range driven (quick ranges + explicit
+**What:** The analytics dashboard: date-range driven (quick ranges + explicit
 start/end date pickers), metric cards (sales, profit, margin, tax collected,
 discounts given, transactions, items), and tabs for top products, slow movers,
 and an hourly-sales table, with CSV export.
 
-**How:** Runs its own SQL directly against the singleton `Database` connection
-(not through `AnalyticsManager`), including profit math from the
-`sale_items.cost_price` snapshots, and renders into `QTableWidget`s.
+**How:** Runs SQL aggregates over `sales`/`sale_items` (and uses
+`Database::getActualGrossProfit()` for profit from the `sale_items.cost_price`
+snapshots) through the injected `Database`, rendering into `QTableWidget`s. The
+date pickers yield `QDate`s passed straight to the typed query API.
 
-**Why:** Its distinguishing features are arbitrary date ranges and profit/margin
-focus — it answers "how did the business do between these two dates" where
-`AnalyticsDialog` answers "how are we trending lately". (Functional overlap with
-the other two analytics UIs is acknowledged technical debt.)
-
-### enhancedanalytics.h / enhancedanalytics.cpp — six widget classes + `EnhancedAnalyticsDialog`
-
-**What:** A modular, composable analytics toolkit: `SalesTrendWidget` (trend with
-total/average/trend labels), `CategoryBreakdownWidget` (pie-style breakdown),
-`HourlySalesWidget` (24-hour heat map), `TopProductsWidget` (ranked table),
-`PaymentAnalysisWidget` (tender mix), `CustomerAnalyticsWidget` (placeholder
-customer stats), `QuickStatsWidget` (today's numbers for embedding in the main
-window), all hosted by `EnhancedAnalyticsDialog` with shared date-range controls.
-
-**How:** Every widget follows the same contract: constructor takes
-`QSqlDatabase&`, `setDateRange()` + `refresh()` re-query and re-render. Charts
-are drawn with plain widgets/labels/stylesheets (the comments note `QChartView`
-was deliberately replaced with `QWidget`), e.g. the heat map colours cells by
-`value/maxValue`.
-
-**Why:** Avoiding the Qt Charts module keeps the deployment smaller and the
-dependency list shorter. The uniform widget contract makes dashboards
-rearrangeable, and each widget is independently testable.
+**Why:** Arbitrary date ranges and a profit/margin focus answer "how did the
+business do between these two dates" — the everyday management view.
 
 ### reportsdialog.h / reportsdialog.cpp — `ReportsDialog`
 
@@ -881,7 +870,61 @@ fire time, where the user wouldn't see the error.
 
 ---
 
-## 12. Build system
+## 12. Accounting & ERP (Tier 4)
+
+A double-entry accounting spine sits under the POS so the numbers reconcile. All
+of these take the shared `QSqlDatabase` by value and post into the same
+connection; money is `Money` (integer cents) throughout.
+
+### ledger.h / ledger.cpp — `Ledger`
+
+**What:** A minimal but real general ledger — a seeded Kenyan chart of accounts,
+balanced journal entries (debits must equal credits), account balances, and a
+trial balance. **How:** `postEntry()` validates and writes header + lines in one
+transaction; an unbalanced or empty entry is rejected. **Why:** "ERP-complete"
+means every money movement (sales, purchases, payroll, VAT) hangs off one spine
+that always balances, turning a POS-with-reports into an accounting system.
+
+### salejournal.h / salejournal.cpp — journal builders
+
+**What:** Pure functions that turn a sale / received purchase / expense into
+balanced GL journal lines (`buildSaleJournal`, `buildPurchaseJournal`,
+`buildExpenseJournal`). **How:** No DB, no UI — just maths over `Money`, unit
+tested in isolation; `CheckoutService` and the PO/expense dialogs call them and
+post the result to `Ledger` best-effort after the underlying record commits.
+**Why:** keeps the account-mapping logic reviewable and pinned by tests, and the
+GL a complete record without coupling the journal maths to the database.
+
+### payroll.h / payroll.cpp — `Payroll`
+
+**What:** Kenyan statutory payroll — NSSF/SHIF/Housing levy deducted before PAYE,
+progressive PAYE bands less personal relief. `computePayslip()` is pure and
+tested; `runPayroll()` stores payslips and posts one balanced GL entry.
+**Why:** correct statutory deductions are legally required; isolating the pure
+maths makes them auditable against the Finance Act.
+
+### vat.h / vat.cpp, etims.h / etims.cpp — `Vat`, eTIMS
+
+**What:** VAT engine + VAT-3 aggregation (`splitInclusive`, `computeVat3`) keyed
+off per-product tax codes, plus a KRA eTIMS client interface (`IEtimsClient` +
+a logging stub pending device onboarding). **How:** VAT-3 is computed from the
+transactional tables (sales/purchase items), not the GL, which is the legal
+source of truth; the standard rate is kept in lock-step with the POS sale-tax
+rate. **Why:** statutory returns must reconcile to what was actually charged.
+
+### ledgerdialog / payrolldialog / vatdialog, and the purchasing/customer/expense dialogs
+
+The Finance menu hosts `LedgerDialog` (trial balance + journal entry),
+`PayrollDialog`, and `VatDialog` (VAT-3 return + tax-code editor), all gated by a
+Tier-4 licence check. Purchasing and customer accounts are driven by
+`SupplierDialog`, `PurchaseOrderDialog`/`NewPurchaseOrderDialog`,
+`ExpenseDialog`, `CustomerDialog`, `RefundDialog`, and `StockTakeDialog` — thin
+UIs over the repositories in §2. Each source file carries its own WHAT/HOW/WHY
+header with the specifics.
+
+---
+
+## 13. Build system
 
 ### CMakeLists.txt
 
@@ -903,15 +946,21 @@ backslash-escaping pitfalls that shaped the implementation.
 required. Optional resources (icon, `.qrc`, license) are existence-checked so
 the project still builds from a bare source checkout.
 
+**Tests:** With `KEYNETIK_BUILD_TESTS=ON` (default) CMake builds six GUI-less
+QtTest suites run via `ctest` — `carttotals_test`, `database_test` (the
+`recordSale`/refund money path through an in-memory DB and the repository
+delegations), `ledger_test`, `payroll_test`, `vat_test`, and `salejournal_test`.
+The CI workflow (`.github/workflows/ci.yml`) builds and runs them on Ubuntu and
+does the full GUI build + `ctest` on Windows.
+
 ---
 
 ## Appendix: known overlaps & legacy files
 
 | Item | Status |
 |---|---|
-| `xdebug.h` | Empty; not in the build. Candidate for deletion. |
-| `mainwindow.ui`, `analyticsdialog.ui` | Present but superseded by programmatic `setupUi()` code. |
+| `xdebug.h`, `mainwindow.ui`, `analyticsdialog.ui` | **Removed.** Dead/empty or superseded by programmatic `setupUI()`. |
+| `AnalyticsManager`, `AnalyticsDialog`, `EnhancedAnalyticsDialog`, `StockManager` | **Removed** in a consolidation pass — they overlapped `AnalyticsDashboard` / `InventoryDialog`, which are the survivors. |
 | `BarcodeScannerWidget` (in barcodescannermanager.h) | Legacy input path; `BarcodeReader` is the current one. |
-| Three analytics UIs (`AnalyticsDialog`, `AnalyticsDashboard`, `EnhancedAnalyticsDialog`) | All functional; overlapping scope, kept for different views (trend vs. date-range/profit vs. modular widgets). |
-| `StockManager` vs `InventoryDialog` | Overlapping inventory UIs; `InventoryDialog` is the richer one. |
 | `DiscountManager::m_pin` (plaintext compare) | Superseded in practice by `SettingsManager::verifyDiscountPin()` (PBKDF2). |
+| `ShiftManager` / `ZReportDialog` | Implemented but not yet wired into the live checkout flow; `Sale.shiftId` is forward-compatible plumbing for when they are. |
