@@ -18,6 +18,7 @@
 #include "database.h"
 #include "salerepository.h"
 #include "supplierrepository.h"
+#include "customerrepository.h"
 #include "passwordhasher.h"
 #include "money.h"           // Money
 #include <QSqlQuery>
@@ -1537,112 +1538,51 @@ Money Database::getTotalExpenses(const QDate &start, const QDate &end)
 
 // ==================== Customers ====================
 
-static Customer customerFromQuery(QSqlQuery &q)
-{
-    Customer c;
-    c.id            = q.value(0).toInt();
-    c.name          = q.value(1).toString();
-    c.phone         = q.value(2).toString();
-    c.email         = q.value(3).toString();
-    c.address       = q.value(4).toString();
-    c.loyaltyPoints = q.value(5).toInt();
-    c.storeCredit   = Money::fromCents(q.value(6).toLongLong());
-    c.isActive      = q.value(7).toBool();
-    c.createdAt     = q.value(8).toString();
-    return c;
-}
-
-static const char *customerSelect =
-    "SELECT id, name, phone, email, address, loyalty_points, store_credit, "
-    "       is_active, created_at FROM customers ";
-
 QVector<Customer> Database::getAllCustomers(bool includeInactive)
 {
-    QVector<Customer> list;
-    QSqlQuery q(db);
-    q.exec(QString(customerSelect)
-           + (includeInactive ? "" : "WHERE is_active = 1 ")
-           + "ORDER BY name");
-    while (q.next())
-        list.append(customerFromQuery(q));
-    return list;
+    return CustomerRepository(db).getAllCustomers(includeInactive);
 }
 
 Customer Database::getCustomerById(int id)
 {
-    QSqlQuery q(db);
-    q.prepare(QString(customerSelect) + "WHERE id = ?");
-    q.addBindValue(id);
-    if (q.exec() && q.next())
-        return customerFromQuery(q);
-    return Customer{};
+    return CustomerRepository(db).getCustomerById(id);
 }
 
 Customer Database::getCustomerByPhone(const QString &phone)
 {
-    QSqlQuery q(db);
-    q.prepare(QString(customerSelect) + "WHERE phone = ? AND is_active = 1");
-    q.addBindValue(phone.trimmed());
-    if (q.exec() && q.next())
-        return customerFromQuery(q);
-    return Customer{};
+    return CustomerRepository(db).getCustomerByPhone(phone);
 }
 
 bool Database::addCustomer(const Customer &customer)
 {
-    QSqlQuery q(db);
-    q.prepare("INSERT INTO customers (name, phone, email, address) VALUES (?, ?, ?, ?)");
-    q.addBindValue(customer.name);
-    q.addBindValue(customer.phone.isEmpty() ? QVariant(QMetaType(QMetaType::QString)) : customer.phone);
-    q.addBindValue(customer.email);
-    q.addBindValue(customer.address);
-    if (!q.exec()) {
-        lastError = "Failed to add customer: " + q.lastError().text();
-        return false;
-    }
-    return true;
+    CustomerRepository repo(db);
+    const bool ok = repo.addCustomer(customer);
+    lastError = repo.lastError();
+    return ok;
 }
 
 bool Database::updateCustomer(const Customer &customer)
 {
-    QSqlQuery q(db);
-    q.prepare("UPDATE customers SET name=?, phone=?, email=?, address=? WHERE id=?");
-    q.addBindValue(customer.name);
-    q.addBindValue(customer.phone.isEmpty() ? QVariant(QMetaType(QMetaType::QString)) : customer.phone);
-    q.addBindValue(customer.email);
-    q.addBindValue(customer.address);
-    q.addBindValue(customer.id);
-    if (!q.exec()) {
-        lastError = "Failed to update customer: " + q.lastError().text();
-        return false;
-    }
-    return true;
+    CustomerRepository repo(db);
+    const bool ok = repo.updateCustomer(customer);
+    lastError = repo.lastError();
+    return ok;
 }
 
 bool Database::deactivateCustomer(int id)
 {
-    QSqlQuery q(db);
-    q.prepare("UPDATE customers SET is_active = 0 WHERE id = ?");
-    q.addBindValue(id);
-    if (!q.exec()) {
-        lastError = "Failed to deactivate customer: " + q.lastError().text();
-        return false;
-    }
-    return true;
+    CustomerRepository repo(db);
+    const bool ok = repo.deactivateCustomer(id);
+    lastError = repo.lastError();
+    return ok;
 }
 
 bool Database::adjustStoreCredit(int customerId, Money delta, const QString &reason)
 {
-    Q_UNUSED(reason)   // available for a future audit log
-    QSqlQuery q(db);
-    q.prepare("UPDATE customers SET store_credit = store_credit + ? WHERE id = ?");
-    q.addBindValue(delta.cents());
-    q.addBindValue(customerId);
-    if (!q.exec()) {
-        lastError = "Failed to adjust store credit: " + q.lastError().text();
-        return false;
-    }
-    return true;
+    CustomerRepository repo(db);
+    const bool ok = repo.adjustStoreCredit(customerId, delta, reason);
+    lastError = repo.lastError();
+    return ok;
 }
 
 QVector<Sale> Database::getCustomerPurchaseHistory(int customerId)
@@ -1727,32 +1667,10 @@ QVector<Database::StockValuationRow> Database::getStockValuation()
 bool Database::redeemLoyaltyPoints(int customerId, int pointsToRedeem,
                                    Money creditValue)
 {
-    // Verify customer has enough points
-    QSqlQuery check(db);
-    check.prepare("SELECT loyalty_points FROM customers WHERE id = ?");
-    check.addBindValue(customerId);
-    if (!check.exec() || !check.next()) {
-        lastError = "Customer not found";
-        return false;
-    }
-    if (check.value(0).toInt() < pointsToRedeem) {
-        lastError = "Insufficient loyalty points";
-        return false;
-    }
-
-    QSqlQuery q(db);
-    q.prepare("UPDATE customers SET "
-              "loyalty_points = loyalty_points - ?, "
-              "store_credit   = store_credit   + ? "
-              "WHERE id = ?");
-    q.addBindValue(pointsToRedeem);
-    q.addBindValue(creditValue.cents());
-    q.addBindValue(customerId);
-    if (!q.exec()) {
-        lastError = "Failed to redeem loyalty points: " + q.lastError().text();
-        return false;
-    }
-    return true;
+    CustomerRepository repo(db);
+    const bool ok = repo.redeemLoyaltyPoints(customerId, pointsToRedeem, creditValue);
+    lastError = repo.lastError();
+    return ok;
 }
 
 // ==================== Backup ====================
