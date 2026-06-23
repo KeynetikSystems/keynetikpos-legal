@@ -43,6 +43,7 @@ private:
     void setupUi();
     QWidget *buildBusinessTab();
     QWidget *buildTaxTab();
+    QWidget *buildStatutoryTab();
     QWidget *buildReceiptTab();
     QWidget *buildSecurityTab();
 
@@ -76,6 +77,10 @@ private:
     QDoubleSpinBox  *m_taxRate      = nullptr;
     QLineEdit       *m_taxLabel     = nullptr;
     QCheckBox       *m_taxInclusive = nullptr;
+
+    // Statutory tab (payroll Finance-Act rates) — only present on the ERP-Full
+    // tier; null otherwise, so load/save must check before use.
+    class StatutoryRatesForm *m_statutoryForm = nullptr;
 
     // Receipt tab
     QTextEdit   *m_receiptFooter = nullptr;

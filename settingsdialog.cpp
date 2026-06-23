@@ -14,6 +14,11 @@
 #include "settingsmanager.h"
 #include "secretstore.h"
 #include "whatsappmanager.h"
+#include "statutoryratesform.h"
+#include "payroll.h"
+#include "licensemanager.h"
+
+#include <QSqlDatabase>
 
 #include <QVBoxLayout>
 #include <QHBoxLayout>
@@ -74,6 +79,10 @@ void SettingsDialog::setupUi()
 
     tabs->addTab(buildBusinessTab(),  "Business");
     tabs->addTab(buildTaxTab(),       "Tax");
+    // The statutory payroll rates only matter on the ERP-Full tier (where the
+    // Payroll module lives), so only offer the tab there.
+    if (LicenseManager::instance().hasTier(4))
+        tabs->addTab(buildStatutoryTab(), "Statutory");
     tabs->addTab(buildReceiptTab(),   "Receipt");
     tabs->addTab(buildMessagingTab(), "Messaging");
     tabs->addTab(buildLoyaltyTab(),   "Loyalty");
@@ -222,6 +231,25 @@ QWidget *SettingsDialog::buildTaxTab()
     layout->addWidget(previewGroup);
     layout->addStretch();
 
+    return w;
+}
+
+QWidget *SettingsDialog::buildStatutoryTab()
+{
+    // Hosts the shared Finance-Act rate form. Values load in loadCurrentValues()
+    // and persist in save(), both via a Payroll over the app's DB connection.
+    auto *w = new QWidget;
+    auto *layout = new QVBoxLayout(w);
+    auto *intro = new QLabel(
+        "Statutory payroll variables used to compute payslips (PAYE, NSSF, SHIF, "
+        "Housing Levy). These take effect when you save this dialog.");
+    intro->setWordWrap(true);
+    intro->setProperty("kind", "secondary");
+    layout->addWidget(intro);
+
+    m_statutoryForm = new StatutoryRatesForm(w);
+    layout->addWidget(m_statutoryForm);
+    layout->addStretch();
     return w;
 }
 
@@ -540,6 +568,14 @@ void SettingsDialog::loadCurrentValues()
     if (m_atSenderId) m_atSenderId->setText(settings.value("africastalking/senderid", "").toString());
 
     onTaxEnabledChanged(s.taxEnabled);
+
+    // Statutory payroll rates live in payroll_config (not BusinessSettings), so
+    // read them through a Payroll over the app's shared connection.
+    if (m_statutoryForm) {
+        Payroll payroll(QSqlDatabase::database());
+        payroll.initSchema();
+        m_statutoryForm->setRates(payroll.rates());
+    }
 }
 
 void SettingsDialog::onTaxEnabledChanged(bool checked)
@@ -678,6 +714,13 @@ void SettingsDialog::save()
         settings.setValue("africastalking/username", m_atUsername->text().trimmed());
     if (m_atSenderId)
         settings.setValue("africastalking/senderid", m_atSenderId->text().trimmed());
+
+    // Persist the statutory payroll rates (only built on the ERP-Full tier).
+    if (m_statutoryForm) {
+        Payroll payroll(QSqlDatabase::database());
+        payroll.initSchema();
+        payroll.saveRates(m_statutoryForm->harvest());
+    }
 
     QMessageBox::information(this, "Settings Saved", "Settings have been saved successfully.");
     accept();

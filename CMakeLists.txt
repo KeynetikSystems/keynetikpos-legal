@@ -65,6 +65,7 @@ set(PROJECT_SOURCES
     salejournal.cpp salejournal.h
     payroll.cpp payroll.h
     payrolldialog.cpp payrolldialog.h
+    statutoryratesform.cpp statutoryratesform.h
     vat.cpp vat.h
     vatdialog.cpp vatdialog.h
     etims.cpp etims.h

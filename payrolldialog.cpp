@@ -3,6 +3,7 @@
 // =============================================================================
 #include "payrolldialog.h"
 #include "payroll.h"
+#include "statutoryratesform.h"
 #include "cart.h"          // formatMoney(), currencySymbol()
 
 #include <QVBoxLayout>
@@ -269,67 +270,22 @@ void PayrollDialog::editRates()
 
 bool PayrollDialog::editStatutoryRates(QWidget *parent, Payroll &payroll)
 {
-    PayrollRates r = payroll.rates();
-
     QDialog dlg(parent);
     dlg.setWindowTitle("Statutory Rates (Finance Act)");
     dlg.setMinimumWidth(420);
-    auto *form = new QFormLayout(&dlg);
+    auto *lay = new QVBoxLayout(&dlg);
 
-    auto bandSpin = [&](Money m) { auto *s = moneySpin(); s->setValue(m.toMajor()); return s; };
-    auto pctSpin  = [&](double v) {
-        auto *s = new QDoubleSpinBox(); s->setRange(0, 100); s->setDecimals(3);
-        s->setSuffix(" %"); s->setValue(v * 100.0); return s; };
-
-    auto *b1 = bandSpin(r.payeBand1), *b2 = bandSpin(r.payeBand2),
-         *b3 = bandSpin(r.payeBand3), *b4 = bandSpin(r.payeBand4);
-    auto *relief = bandSpin(r.personalRelief);
-    auto *nssfR = pctSpin(r.nssfRate); auto *nssfCap = bandSpin(r.nssfCap);
-    auto *shifR = pctSpin(r.shifRate); auto *shifMin = bandSpin(r.shifMin);
-    auto *houseR = pctSpin(r.housingRate);
-    auto *effDate = new QLineEdit(r.effectiveDate);  // ISO date these took effect
-    effDate->setPlaceholderText("yyyy-MM-dd");
-    auto *srcNote = new QLineEdit(r.ratesNote);
-
-    form->addRow("PAYE band 1 upper (10%):", b1);
-    form->addRow("PAYE band 2 upper (25%):", b2);
-    form->addRow("PAYE band 3 upper (30%):", b3);
-    form->addRow("PAYE band 4 upper (32.5%):", b4);
-    form->addRow("Personal relief / month:", relief);
-    form->addRow("NSSF rate:", nssfR);
-    form->addRow("NSSF cap (pensionable):", nssfCap);
-    form->addRow("SHIF rate:", shifR);
-    form->addRow("SHIF minimum:", shifMin);
-    form->addRow("Housing levy rate:", houseR);
-    form->addRow("Effective date:", effDate);
-    form->addRow("Source note:", srcNote);
-
-    auto *note = new QLabel("Verify against the current KRA / Finance Act figures, "
-                            "and update the effective date when you change a rate. "
-                            "See docs/STATUTORY_RATES.md.");
-    note->setProperty("kind", "secondary");
-    note->setWordWrap(true);
-    form->addRow(note);
+    auto *formWidget = new StatutoryRatesForm(&dlg);
+    formWidget->setRates(payroll.rates());
+    lay->addWidget(formWidget);
 
     auto *box = new QDialogButtonBox(QDialogButtonBox::Save | QDialogButtonBox::Cancel);
-    form->addRow(box);
+    lay->addWidget(box);
     connect(box, &QDialogButtonBox::accepted, &dlg, &QDialog::accept);
     connect(box, &QDialogButtonBox::rejected, &dlg, &QDialog::reject);
     if (dlg.exec() != QDialog::Accepted) return false;
 
-    r.payeBand1 = Money::fromMajor(b1->value());
-    r.payeBand2 = Money::fromMajor(b2->value());
-    r.payeBand3 = Money::fromMajor(b3->value());
-    r.payeBand4 = Money::fromMajor(b4->value());
-    r.personalRelief = Money::fromMajor(relief->value());
-    r.nssfRate = nssfR->value() / 100.0;
-    r.nssfCap  = Money::fromMajor(nssfCap->value());
-    r.shifRate = shifR->value() / 100.0;
-    r.shifMin  = Money::fromMajor(shifMin->value());
-    r.housingRate = houseR->value() / 100.0;
-    r.effectiveDate = effDate->text().trimmed();
-    r.ratesNote     = srcNote->text().trimmed();
-    return payroll.saveRates(r);
+    return payroll.saveRates(formWidget->harvest());
 }
 
 void PayrollDialog::refreshRatesCaption()
