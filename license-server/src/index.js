@@ -88,13 +88,22 @@ function entitlement(row) {
   return out;
 }
 
-// Maps a paid amount (whole KES) to a plan tier for self-serve M-Pesa purchases.
-// ADJUST THESE THRESHOLDS to your pricing — they are the price list, in code.
+// Self-serve plan prices — ONE-TIME, whole KES. This IS the price list: a
+// customer M-Pesas the tier's price and gets that tier; paying between tiers
+// rounds DOWN to the tier they fully covered, and any completed payment grants
+// at least POS Core. Positioned against monthly SaaS (each tier is well under a
+// year of the tool it replaces, then free forever). Tune to your market and
+// re-deploy. NOTE: the M-Pesa flow grants a single-device key; multi-till deals
+// are sold manually (admin.ps1 New-License -Tier -MaxDevices).
+const PRICE_POS_PRO  = 8000;    // Tier 2 — reports, users, multi-till, messaging
+const PRICE_ERP_LITE = 18000;   // Tier 3 — purchasing, customers, expenses, P&L
+const PRICE_ERP_FULL = 35000;   // Tier 4 — general ledger, payroll, VAT
+
 function tierForAmount(kes) {
-  if (kes >= 15000) return 4;   // ERP Full
-  if (kes >= 7000)  return 3;   // ERP Lite
-  if (kes >= 3000)  return 2;   // POS Pro
-  return 1;                     // POS Core
+  if (kes >= PRICE_ERP_FULL) return 4;
+  if (kes >= PRICE_ERP_LITE) return 3;
+  if (kes >= PRICE_POS_PRO)  return 2;
+  return 1;                     // POS Core (floor for any completed payment)
 }
 
 // ── Stock assignment (shared by /admin/sell and /webhook/mpesa) ───────────────
