@@ -79,10 +79,9 @@ QString flatChrome()
         QLineEdit:focus, QComboBox:focus, QSpinBox:focus, QDoubleSpinBox:focus,
         QDateEdit:focus, QTimeEdit:focus, QDateTimeEdit:focus {
             border: 2px solid %focus%; }
-        QComboBox::drop-down { border: none; width: 20px; }
-        QComboBox::down-arrow { image: none; width: 0; height: 0;
-            border-left: 5px solid transparent; border-right: 5px solid transparent;
-            border-top: 6px solid %text%; margin-right: 8px; }
+        /* Leave the drop-down arrow native: Qt's QSS engine does NOT support the
+           CSS border-triangle hack, so styling ::down-arrow that way renders an
+           ugly solid dark block (and cramps the combo). Native arrow it is. */
         QComboBox QAbstractItemView { background-color: %inputBg%; color: %text%;
             selection-background-color: %accent%; selection-color: white; }
 
@@ -158,10 +157,8 @@ QString glossyChrome(const ColorScheme &s)
             padding: 6px; color: %TEXT%; font-size: 11pt; }
         QLineEdit:focus, QComboBox:focus, QSpinBox:focus, QDoubleSpinBox:focus {
             border: 1px solid %FOCUS%; }
-        QComboBox::drop-down { border: none; width: 20px; }
-        QComboBox::down-arrow { image: none; width: 0; height: 0;
-            border-left: 5px solid transparent; border-right: 5px solid transparent;
-            border-top: 6px solid %TEXT%; margin-right: 8px; }
+        /* Native drop-down arrow — see the light-theme note above (the QSS
+           border-triangle hack renders as a dark block in Qt). */
         QComboBox QAbstractItemView { background: #ffffff; color: %TEXT%;
             selection-background-color: %ACCENT%; selection-color: white; }
 
