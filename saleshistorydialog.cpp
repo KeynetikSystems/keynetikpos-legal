@@ -22,8 +22,9 @@
 #include <QTextStream>
 #include <QDateTime>
 
-SalesHistoryDialog::SalesHistoryDialog(QWidget *parent)
+SalesHistoryDialog::SalesHistoryDialog(Database &db, QWidget *parent)
     : QDialog(parent)
+    , m_db(db)
     , selectedSaleId(-1)
 {
     setWindowTitle("Sales History");
@@ -188,7 +189,7 @@ void SalesHistoryDialog::loadSales()
     const QDate startDate = startDateEdit->date();
     const QDate endDate   = endDateEdit->date();
 
-    sales = Database::instance().getSalesByDateRange(startDate, endDate);
+    sales = m_db.getSalesByDateRange(startDate, endDate);
     updateSalesTable();
     updateSummary();
 }
@@ -249,7 +250,7 @@ void SalesHistoryDialog::updateSalesTable()
         salesTable->setItem(row, 6, totalItem);
 
         // Visually mark refunded sales
-        if (Database::instance().isRefunded(sale.id)) {
+        if (m_db.isRefunded(sale.id)) {
             for (int col = 0; col < salesTable->columnCount(); ++col) {
                 if (auto *cell = salesTable->item(row, col)) {
                     cell->setBackground(QBrush(QColor(scheme.errorBg)));
@@ -285,8 +286,8 @@ void SalesHistoryDialog::updateSummary()
 
 void SalesHistoryDialog::showSaleDetails(int saleId)
 {
-    Sale sale = Database::instance().getSaleById(saleId);
-    QVector<SaleItem> items = Database::instance().getSaleItems(saleId);
+    Sale sale = m_db.getSaleById(saleId);
+    QVector<SaleItem> items = m_db.getSaleItems(saleId);
 
     QString details = QString("═══════════════════════════════\n")
                       + QString("         SALE DETAILS\n")
@@ -316,7 +317,7 @@ void SalesHistoryDialog::showSaleDetails(int saleId)
                + QString("TOTAL:     %1\n").arg(formatCurrency(sale.total))
                + QString("═══════════════════════════════\n");
 
-    if (Database::instance().isRefunded(saleId)) {
+    if (m_db.isRefunded(saleId)) {
         details += QString("\nTHIS SALE HAS BEEN REFUNDED\n");
     }
 
@@ -351,14 +352,14 @@ void SalesHistoryDialog::onRefundClicked()
     }
 
     // Guard against double refund
-    if (Database::instance().isRefunded(selectedSaleId)) {
+    if (m_db.isRefunded(selectedSaleId)) {
         QMessageBox::information(this, "Already Refunded",
                                  QString("Sale #%1 has already been refunded.").arg(selectedSaleId));
         return;
     }
 
-    Sale sale = Database::instance().getSaleById(selectedSaleId);
-    QVector<SaleItem> items = Database::instance().getSaleItems(selectedSaleId);
+    Sale sale = m_db.getSaleById(selectedSaleId);
+    QVector<SaleItem> items = m_db.getSaleItems(selectedSaleId);
 
     // Build a summary of items that will be returned
     QString itemList;
@@ -396,7 +397,7 @@ void SalesHistoryDialog::onRefundClicked()
     // Pull processed-by from UserManager if available, else fallback
     QString processedBy = "Manager";
 
-    if (Database::instance().processRefund(selectedSaleId, reason.trimmed(), processedBy)) {
+    if (m_db.processRefund(selectedSaleId, reason.trimmed(), processedBy)) {
         // Mark the row visually in the table
         const ColorScheme scheme = getColorScheme();
         for (int row = 0; row < salesTable->rowCount(); ++row) {
@@ -481,7 +482,7 @@ void SalesHistoryDialog::onSaleSelected(int row)
     viewDetailsBtn->setEnabled(true);
 
     // Disable refund if already refunded
-    bool alreadyRefunded = Database::instance().isRefunded(selectedSaleId);
+    bool alreadyRefunded = m_db.isRefunded(selectedSaleId);
     refundBtn->setEnabled(!alreadyRefunded);
     refundBtn->setToolTip(alreadyRefunded ? "This sale has already been refunded" : "Process refund");
 }

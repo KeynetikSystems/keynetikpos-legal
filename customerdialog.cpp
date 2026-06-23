@@ -10,8 +10,9 @@
 #include <QMessageBox>
 #include <QInputDialog>
 
-CustomerDialog::CustomerDialog(QWidget *parent)
+CustomerDialog::CustomerDialog(Database &db, QWidget *parent)
     : QDialog(parent)
+    , m_db(db)
 {
     setupUI();
     loadCustomers();
@@ -53,7 +54,7 @@ void CustomerDialog::setupUI()
     connect(table, &QTableWidget::cellDoubleClicked, this, [this](int /*row*/, int /*col*/) {
         const int id = selectedCustomerId();
         if (id <= 0) return;
-        m_selectedCustomer = Database::instance().getCustomerById(id);
+        m_selectedCustomer = m_db.getCustomerById(id);
         accept();
     });
     leftLayout->addWidget(table);
@@ -126,7 +127,7 @@ void CustomerDialog::setupUI()
     connect(selectButton, &QPushButton::clicked, this, [this]() {
         const int id = selectedCustomerId();
         if (id <= 0) return;
-        m_selectedCustomer = Database::instance().getCustomerById(id);
+        m_selectedCustomer = m_db.getCustomerById(id);
         accept();
     });
     footerLayout->addWidget(selectButton);
@@ -141,7 +142,7 @@ void CustomerDialog::setupUI()
 
 void CustomerDialog::loadCustomers(const QString &filter)
 {
-    const QVector<Customer> customers = Database::instance().getAllCustomers();
+    const QVector<Customer> customers = m_db.getAllCustomers();
     table->setRowCount(0);
     for (const Customer &c : customers) {
         if (!filter.isEmpty()) {
@@ -174,7 +175,7 @@ void CustomerDialog::onCustomerSelected()
 
 void CustomerDialog::showCustomerDetail(int customerId)
 {
-    const Customer c = Database::instance().getCustomerById(customerId);
+    const Customer c = m_db.getCustomerById(customerId);
     if (c.id <= 0) { clearDetail(); return; }
 
     detailName->setText(c.name);
@@ -185,7 +186,7 @@ void CustomerDialog::showCustomerDetail(int customerId)
     topUpButton->setEnabled(true);
     topUpButton->setProperty("_customerId", customerId);
 
-    const QVector<Sale> history = Database::instance().getCustomerPurchaseHistory(customerId);
+    const QVector<Sale> history = m_db.getCustomerPurchaseHistory(customerId);
     historyTable->setRowCount(history.size());
     for (int row = 0; row < history.size(); ++row) {
         const Sale &s = history[row];
@@ -252,9 +253,9 @@ void CustomerDialog::onAddClicked()
 {
     Customer c;
     if (!runCustomerForm("Add Customer", &c)) return;
-    if (!Database::instance().addCustomer(c)) {
+    if (!m_db.addCustomer(c)) {
         QMessageBox::critical(this, "Error",
-            "Failed to add customer: " + Database::instance().getLastError());
+            "Failed to add customer: " + m_db.getLastError());
         return;
     }
     loadCustomers(searchEdit->text());
@@ -264,11 +265,11 @@ void CustomerDialog::onEditClicked()
 {
     const int id = selectedCustomerId();
     if (id < 0) { QMessageBox::information(this, "No Selection", "Select a customer."); return; }
-    Customer c = Database::instance().getCustomerById(id);
+    Customer c = m_db.getCustomerById(id);
     if (!runCustomerForm("Edit Customer", &c)) return;
-    if (!Database::instance().updateCustomer(c)) {
+    if (!m_db.updateCustomer(c)) {
         QMessageBox::critical(this, "Error",
-            "Failed to update customer: " + Database::instance().getLastError());
+            "Failed to update customer: " + m_db.getLastError());
         return;
     }
     loadCustomers(searchEdit->text());
@@ -282,7 +283,7 @@ void CustomerDialog::onDeactivateClicked()
     if (QMessageBox::question(this, "Deactivate Customer",
             "Deactivate this customer? Their purchase history is preserved.")
         != QMessageBox::Yes) return;
-    Database::instance().deactivateCustomer(id);
+    m_db.deactivateCustomer(id);
     loadCustomers(searchEdit->text());
     clearDetail();
 }
@@ -298,9 +299,9 @@ void CustomerDialog::onTopUpCreditClicked()
     if (!ok || amount <= 0.0) return;
 
     const Money delta = Money::fromMajor(amount);
-    if (!Database::instance().adjustStoreCredit(id, delta, "Manual top-up")) {
+    if (!m_db.adjustStoreCredit(id, delta, "Manual top-up")) {
         QMessageBox::critical(this, "Error",
-            "Failed to add store credit: " + Database::instance().getLastError());
+            "Failed to add store credit: " + m_db.getLastError());
         return;
     }
     showCustomerDetail(id);

@@ -28,8 +28,10 @@ class SupplierDialog : public QDialog
 {
     Q_OBJECT
 
+    Database &m_db;   // injected app DB connection (not owned)
+
 public:
-    explicit SupplierDialog(QWidget *parent = nullptr);
+    explicit SupplierDialog(Database &db, QWidget *parent = nullptr);
 
 private slots:
     void onAddClicked();

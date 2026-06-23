@@ -19,8 +19,9 @@
 #include <QDebug>
 #include <QDateTime>
 
-ScheduleManager::ScheduleManager(QObject *parent)
+ScheduleManager::ScheduleManager(Database &db, QObject *parent)
     : QObject(parent)
+    , m_db(db)
     , m_timer(new QTimer(this))
 {
     // Tick every minute to check schedules
@@ -467,15 +468,15 @@ QString ScheduleManager::buildReportBody(const MessageSchedule &s) const
     QString title = s.scheduleName;
     QString dateStr = QDateTime::currentDateTime().toString("yyyy-MM-dd HH:mm");
 
-    if (!Database::instance().isOpen()) {
+    if (!m_db.isOpen()) {
         return QString("Error: Database unavailable");
     }
 
     switch (s.reportType) {
     case MessageSchedule::ZReport: {
-        Money todaySales = Database::instance().getTotalSalesToday();
-        int todayTx      = Database::instance().getTotalTransactionsToday();
-        Money profit     = Database::instance().getActualGrossProfitToday();
+        Money todaySales = m_db.getTotalSalesToday();
+        int todayTx      = m_db.getTotalTransactionsToday();
+        Money profit     = m_db.getActualGrossProfitToday();
         return QString("📊 *%1*\n"
                        "📅 %2\n\n"
                        "💰 Total Sales: KES %3\n"
@@ -487,8 +488,8 @@ QString ScheduleManager::buildReportBody(const MessageSchedule &s) const
             .arg(profit.toMajor(), 0, 'f', 2);
     }
     case MessageSchedule::SalesSummary: {
-        Money todaySales = Database::instance().getTotalSalesToday();
-        int todayTx      = Database::instance().getTotalTransactionsToday();
+        Money todaySales = m_db.getTotalSalesToday();
+        int todayTx      = m_db.getTotalTransactionsToday();
         return QString("💵 *%1*\n"
                        "📅 %2\n\n"
                        "Sales: KES %3  |  Transactions: %4")

@@ -31,8 +31,10 @@ class CustomerDialog : public QDialog
 {
     Q_OBJECT
 
+    Database &m_db;   // injected app DB connection (not owned)
+
 public:
-    explicit CustomerDialog(QWidget *parent = nullptr);
+    explicit CustomerDialog(Database &db, QWidget *parent = nullptr);
 
     // Returns the customer the user double-clicked or clicked "Select" on.
     // id == 0 means no selection was made (dialog managed/browsed only).

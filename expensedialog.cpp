@@ -19,8 +19,9 @@
 #include <QDate>
 #include <QGroupBox>
 
-ExpenseDialog::ExpenseDialog(QWidget *parent)
+ExpenseDialog::ExpenseDialog(Database &db, QWidget *parent)
     : QDialog(parent)
+    , m_db(db)
 {
     setupUI();
     loadExpenses();
@@ -126,7 +127,7 @@ void ExpenseDialog::loadExpenses()
 {
     const QDate from = fromDateEdit->date();
     const QDate to   = toDateEdit->date();
-    const QVector<Expense> expenses = Database::instance().getExpensesByDateRange(from, to);
+    const QVector<Expense> expenses = m_db.getExpensesByDateRange(from, to);
 
     expenseTable->setRowCount(expenses.size());
     Money total;
@@ -144,7 +145,7 @@ void ExpenseDialog::loadExpenses()
 
 void ExpenseDialog::loadCategories()
 {
-    const QVector<ExpenseCategory> cats = Database::instance().getAllExpenseCategories();
+    const QVector<ExpenseCategory> cats = m_db.getAllExpenseCategories();
     categoryTable->setRowCount(cats.size());
     for (int row = 0; row < cats.size(); ++row) {
         categoryTable->setItem(row, 0, new QTableWidgetItem(QString::number(cats[row].id)));
@@ -159,7 +160,7 @@ void ExpenseDialog::onFilterClicked()
 
 void ExpenseDialog::onAddExpenseClicked()
 {
-    const QVector<ExpenseCategory> cats = Database::instance().getAllExpenseCategories();
+    const QVector<ExpenseCategory> cats = m_db.getAllExpenseCategories();
     if (cats.isEmpty()) {
         QMessageBox::warning(this, "No Categories",
             "Add at least one expense category in the Categories tab first.");
@@ -208,9 +209,9 @@ void ExpenseDialog::onAddExpenseClicked()
     e.date        = dateEdit->date();
     e.recordedBy  = UserManager::instance().getCurrentUsername();
 
-    if (!Database::instance().addExpense(e)) {
+    if (!m_db.addExpense(e)) {
         QMessageBox::critical(this, "Error",
-            "Failed to record expense: " + Database::instance().getLastError());
+            "Failed to record expense: " + m_db.getLastError());
         return;
     }
 
@@ -241,9 +242,9 @@ void ExpenseDialog::onAddCategoryClicked()
     const QString name = QInputDialog::getText(this, "Add Category",
         "Category name:", QLineEdit::Normal, QString(), &ok).trimmed();
     if (!ok || name.isEmpty()) return;
-    if (!Database::instance().addExpenseCategory(name)) {
+    if (!m_db.addExpenseCategory(name)) {
         QMessageBox::critical(this, "Error",
-            "Failed to add category: " + Database::instance().getLastError());
+            "Failed to add category: " + m_db.getLastError());
         return;
     }
     loadCategories();
@@ -259,6 +260,6 @@ void ExpenseDialog::onDeactivateCategoryClicked()
     const int id = categoryTable->item(selected.first().row(), 0)->text().toInt();
     if (QMessageBox::question(this, "Remove Category", "Remove this expense category?")
         != QMessageBox::Yes) return;
-    Database::instance().deactivateExpenseCategory(id);
+    m_db.deactivateExpenseCategory(id);
     loadCategories();
 }

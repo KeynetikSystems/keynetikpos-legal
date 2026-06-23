@@ -48,12 +48,16 @@ enum class NotificationType {
     Info
 };
 
+class Database;
+
 class InventoryDialog : public QDialog
 {
     Q_OBJECT
 
+    Database &m_db;   // injected app DB connection (not owned)
+
 public:
-    explicit InventoryDialog(InventoryManager *manager, QWidget *parent = nullptr);
+    explicit InventoryDialog(Database &db, InventoryManager *manager, QWidget *parent = nullptr);
     ~InventoryDialog();
 
 protected:

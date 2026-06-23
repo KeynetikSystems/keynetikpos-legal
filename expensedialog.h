@@ -22,12 +22,16 @@
 #include <QVBoxLayout>
 #include <QHBoxLayout>
 
+class Database;
+
 class ExpenseDialog : public QDialog
 {
     Q_OBJECT
 
+    Database &m_db;   // injected app DB connection (not owned)
+
 public:
-    explicit ExpenseDialog(QWidget *parent = nullptr);
+    explicit ExpenseDialog(Database &db, QWidget *parent = nullptr);
 
 private slots:
     void onAddExpenseClicked();

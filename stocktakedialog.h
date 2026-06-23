@@ -34,8 +34,10 @@ class StockTakeDialog : public QDialog
 {
     Q_OBJECT
 
+    Database &m_db;   // injected app DB connection (not owned)
+
 public:
-    explicit StockTakeDialog(QWidget *parent = nullptr);
+    explicit StockTakeDialog(Database &db, QWidget *parent = nullptr);
 
 private slots:
     void onCategoryChanged(const QString &category);

@@ -28,8 +28,10 @@ class ReportsDialog : public QDialog
 {
     Q_OBJECT
 
+    Database &m_db;   // injected app DB connection (not owned)
+
 public:
-    explicit ReportsDialog(QWidget *parent = nullptr);
+    explicit ReportsDialog(Database &db, QWidget *parent = nullptr);
     ~ReportsDialog();
 
 private slots:

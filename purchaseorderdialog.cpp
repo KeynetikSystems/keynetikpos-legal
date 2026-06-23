@@ -19,8 +19,9 @@
 // ─────────────────────────────────────────────────────────────────────────────
 // NewPurchaseOrderDialog
 // ─────────────────────────────────────────────────────────────────────────────
-NewPurchaseOrderDialog::NewPurchaseOrderDialog(QWidget *parent)
+NewPurchaseOrderDialog::NewPurchaseOrderDialog(Database &db, QWidget *parent)
     : QDialog(parent)
+    , m_db(db)
 {
     setupUI();
 }
@@ -34,7 +35,7 @@ void NewPurchaseOrderDialog::setupUI()
 
     QFormLayout *headerForm = new QFormLayout();
     supplierCombo = new QComboBox(this);
-    for (const Supplier &s : Database::instance().getAllSuppliers())
+    for (const Supplier &s : m_db.getAllSuppliers())
         supplierCombo->addItem(s.name, s.id);
     headerForm->addRow("Supplier:", supplierCombo);
     mainLayout->addLayout(headerForm);
@@ -52,7 +53,7 @@ void NewPurchaseOrderDialog::setupUI()
     QHBoxLayout *lineLayout = new QHBoxLayout(lineGroup);
 
     productCombo = new QComboBox(this);
-    m_products = Database::instance().getAllProducts();
+    m_products = m_db.getAllProducts();
     for (const Product &p : m_products)
         productCombo->addItem(p.name, p.id);
     lineLayout->addWidget(new QLabel("Product:", this));
@@ -182,11 +183,11 @@ void NewPurchaseOrderDialog::onCreateClicked()
     const int supplierId = supplierCombo->currentData().toInt();
     const QString createdBy = UserManager::instance().getCurrentUsername();
 
-    const int poId = Database::instance().createPurchaseOrder(
+    const int poId = m_db.createPurchaseOrder(
         supplierId, m_lines, QString(), createdBy);
     if (poId < 0) {
         QMessageBox::critical(this, "Error",
-            "Failed to create purchase order: " + Database::instance().getLastError());
+            "Failed to create purchase order: " + m_db.getLastError());
         return;
     }
     QMessageBox::information(this, "Purchase Order Created",
@@ -198,8 +199,9 @@ void NewPurchaseOrderDialog::onCreateClicked()
 // ─────────────────────────────────────────────────────────────────────────────
 // PurchaseOrderDialog
 // ─────────────────────────────────────────────────────────────────────────────
-PurchaseOrderDialog::PurchaseOrderDialog(QWidget *parent)
+PurchaseOrderDialog::PurchaseOrderDialog(Database &db, QWidget *parent)
     : QDialog(parent)
+    , m_db(db)
 {
     setupUI();
     loadOrders();
@@ -258,7 +260,7 @@ void PurchaseOrderDialog::setupUI()
 
 void PurchaseOrderDialog::loadOrders()
 {
-    const QVector<PurchaseOrder> orders = Database::instance().getAllPurchaseOrders();
+    const QVector<PurchaseOrder> orders = m_db.getAllPurchaseOrders();
     table->setRowCount(orders.size());
     for (int row = 0; row < orders.size(); ++row) {
         const PurchaseOrder &po = orders[row];
@@ -282,7 +284,7 @@ int PurchaseOrderDialog::selectedOrderId() const
 
 void PurchaseOrderDialog::onNewOrderClicked()
 {
-    NewPurchaseOrderDialog dlg(this);
+    NewPurchaseOrderDialog dlg(m_db, this);
     if (dlg.exec() == QDialog::Accepted)
         loadOrders();
 }
@@ -295,7 +297,7 @@ void PurchaseOrderDialog::onViewItemsClicked()
         return;
     }
 
-    const QVector<PurchaseOrderItem> items = Database::instance().getPurchaseOrderItems(id);
+    const QVector<PurchaseOrderItem> items = m_db.getPurchaseOrderItems(id);
     QString text;
     for (const PurchaseOrderItem &item : items) {
         text += QString("%1  x%2  @ %3  = %4\n")
@@ -323,9 +325,9 @@ void PurchaseOrderDialog::onReceiveClicked()
         return;
 
     const QString receivedBy = UserManager::instance().getCurrentUsername();
-    if (!Database::instance().receivePurchaseOrder(id, receivedBy)) {
+    if (!m_db.receivePurchaseOrder(id, receivedBy)) {
         QMessageBox::critical(this, "Error",
-            "Failed to receive purchase order: " + Database::instance().getLastError());
+            "Failed to receive purchase order: " + m_db.getLastError());
         return;
     }
     // Auto-post the received goods to the General Ledger:
@@ -335,7 +337,7 @@ void PurchaseOrderDialog::onReceiveClicked()
         Vat vat(QSqlDatabase::database());
         vat.initSchema();
         const Money inputVat = vat.purchaseOrderInputVat(id);
-        const PurchaseOrder po = Database::instance().getPurchaseOrderById(id);
+        const PurchaseOrder po = m_db.getPurchaseOrderById(id);
         const QVector<GLLine> lines = buildPurchaseJournal(po.total, inputVat);
         if (!lines.isEmpty()) {
             Ledger ledger(QSqlDatabase::database());
@@ -365,9 +367,9 @@ void PurchaseOrderDialog::onCancelOrderClicked()
             QString("Cancel Purchase Order #%1?").arg(id))
         != QMessageBox::Yes)
         return;
-    if (!Database::instance().cancelPurchaseOrder(id)) {
+    if (!m_db.cancelPurchaseOrder(id)) {
         QMessageBox::critical(this, "Error",
-            "Failed to cancel purchase order: " + Database::instance().getLastError());
+            "Failed to cancel purchase order: " + m_db.getLastError());
         return;
     }
     loadOrders();

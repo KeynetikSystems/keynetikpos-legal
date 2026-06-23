@@ -39,7 +39,7 @@ struct CheckoutResult {
 class CheckoutService
 {
 public:
-    CheckoutService(InventoryManager *inventory, ReceiptPrinter *printer);
+    CheckoutService(Database &db, InventoryManager *inventory, ReceiptPrinter *printer);
 
     CheckoutResult finalizeSale(const Cart &cart, const CartTotals &totals,
                                 const QString &paymentMethod,
@@ -50,6 +50,7 @@ public:
                                 const QVector<SalePayment> &payments = {}) const;
 
 private:
+    Database &m_db;
     InventoryManager *m_inventory;
     ReceiptPrinter   *m_printer;
 };

@@ -57,6 +57,7 @@
 #include "BarcodeReader.h"
 
 class CartService;
+class Database;
 class CartModel;
 class CheckoutService;
 class ProductGridModel;
@@ -73,7 +74,7 @@ class MainWindow : public QMainWindow
     Q_OBJECT
 
 public:
-    explicit MainWindow(QWidget *parent = nullptr);
+    explicit MainWindow(Database &db, QWidget *parent = nullptr);
     ~MainWindow() override;
 
 signals:
@@ -82,6 +83,10 @@ signals:
     void logoutRequested();
 
 private:
+    // Injected (not owned): the app's single Database connection, created in
+    // main() and shared with every dialog/manager this window constructs.
+    Database &m_db;
+
     // ── Sub-system objects ──────────────────────────────────────────────────
     InventoryManager *inventoryManager  { nullptr };
     ReceiptPrinter   *receiptPrinter    { nullptr };

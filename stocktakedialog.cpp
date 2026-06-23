@@ -7,8 +7,9 @@
 #include <QMessageBox>
 #include <QSpinBox>
 
-StockTakeDialog::StockTakeDialog(QWidget *parent)
+StockTakeDialog::StockTakeDialog(Database &db, QWidget *parent)
     : QDialog(parent)
+    , m_db(db)
 {
     setupUI();
     loadProducts();
@@ -30,7 +31,7 @@ void StockTakeDialog::setupUI()
     filterLayout->addWidget(new QLabel("Filter by Category:", this));
     categoryCombo = new QComboBox(this);
     categoryCombo->addItem("All Categories");
-    const QStringList cats = Database::instance().getAllCategories();
+    const QStringList cats = m_db.getAllCategories();
     for (const QString &cat : cats)
         categoryCombo->addItem(cat);
     connect(categoryCombo, &QComboBox::currentTextChanged,
@@ -73,7 +74,7 @@ void StockTakeDialog::loadProducts(const QString &categoryFilter)
 {
     m_loading = true;
 
-    const QVector<Product> products = Database::instance().getAllProducts();
+    const QVector<Product> products = m_db.getAllProducts();
     table->setRowCount(0);
 
     for (const Product &p : products) {
@@ -185,14 +186,14 @@ void StockTakeDialog::onSubmitCount()
             continue;
 
         // Apply the new stock level and log the adjustment.
-        if (!Database::instance().updateStock(productId, counted)) {
+        if (!m_db.updateStock(productId, counted)) {
             QMessageBox::critical(this, "Error",
                 QString("Failed to update stock for %1: %2")
-                    .arg(productName, Database::instance().getLastError()));
+                    .arg(productName, m_db.getLastError()));
             continue;
         }
 
-        Database::instance().logStockAdjustment(
+        m_db.logStockAdjustment(
             productId, productName,
             systemQty, counted,
             "Stock Take", cashier);

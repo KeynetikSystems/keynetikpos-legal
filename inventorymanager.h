@@ -48,8 +48,10 @@ class InventoryManager : public QObject
 {
     Q_OBJECT
 
+    Database &m_db;   // injected app DB connection (not owned)
+
 public:
-    InventoryManager();
+    explicit InventoryManager(Database &db);
     ~InventoryManager();
 
     // Query methods

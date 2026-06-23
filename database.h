@@ -218,7 +218,15 @@ public:
         QString adjustedAt;
     };
 
-    static Database& instance();
+    // The app owns a single Database (created in main(), one per process) and
+    // injects it where needed; tests own their own. The connection is set up in
+    // the constructor; configureForTesting() can repoint it before initialize().
+    Database();
+    ~Database();
+
+    // Non-copyable: it owns a QSqlDatabase connection handle.
+    Database(const Database&) = delete;
+    Database& operator=(const Database&) = delete;
 
     // seedSampleData inserts the demo products + default admin on an empty DB.
     // Tests pass false so they start from a clean, deterministic schema.
@@ -387,12 +395,6 @@ public:
     bool redeemLoyaltyPoints(int customerId, int pointsToRedeem, Money creditValue);
 
 private:
-    Database();
-    ~Database();
-
-    Database(const Database&) = delete;
-    Database& operator=(const Database&) = delete;
-
     QSqlDatabase db;
     QString lastError;
     QString m_dbPath;           // full path to pos_database.db (for backups)

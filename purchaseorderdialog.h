@@ -37,8 +37,10 @@ class NewPurchaseOrderDialog : public QDialog
 {
     Q_OBJECT
 
+    Database &m_db;   // injected app DB connection (not owned)
+
 public:
-    explicit NewPurchaseOrderDialog(QWidget *parent = nullptr);
+    explicit NewPurchaseOrderDialog(Database &db, QWidget *parent = nullptr);
 
 private slots:
     void onAddLineClicked();
@@ -71,8 +73,10 @@ class PurchaseOrderDialog : public QDialog
 {
     Q_OBJECT
 
+    Database &m_db;   // injected app DB connection (not owned)
+
 public:
-    explicit PurchaseOrderDialog(QWidget *parent = nullptr);
+    explicit PurchaseOrderDialog(Database &db, QWidget *parent = nullptr);
 
 private slots:
     void onNewOrderClicked();

@@ -218,7 +218,7 @@ int main(int argc, char *argv[])
     }
 
     // Initialize database
-    Database &db = Database::instance();
+    Database db;   // the app owns the single Database; injected into MainWindow
     if (!db.initialize()) {
         QMessageBox::critical(nullptr, "Database Error",
                               QString("Failed to initialize database: %1").arg(db.getLastError()));
@@ -244,7 +244,7 @@ int main(int argc, char *argv[])
 
         loopToLogin = false;
 
-        MainWindow w;
+        MainWindow w(db);
         QObject::connect(&w, &MainWindow::logoutRequested,
                          [&loopToLogin]() { loopToLogin = true; });
         w.show();

@@ -41,8 +41,9 @@ namespace {
 // Constructor / Destructor
 // ─────────────────────────────────────────────────────────────────────────────
 
-AnalyticsDashboard::AnalyticsDashboard(QWidget *parent)
+AnalyticsDashboard::AnalyticsDashboard(Database &db, QWidget *parent)
     : QDialog(parent)
+    , m_db(db)
 {
     setWindowTitle("Analytics Dashboard");
     resize(1200, 800);
@@ -319,7 +320,7 @@ SalesMetrics AnalyticsDashboard::calculateMetrics()
         metrics.itemsSold = query.value("total_items").toInt();
 
     metrics.totalProfit =
-        Database::instance().getActualGrossProfit(startDate.date(), endDate.date());
+        m_db.getActualGrossProfit(startDate.date(), endDate.date());
 
     return metrics;
 }

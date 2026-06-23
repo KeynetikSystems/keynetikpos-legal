@@ -30,12 +30,16 @@
 #include "MessageSchedule.h"
 #include "messageprovider.h"
 
+class Database;
+
 class ScheduleManager : public QObject
 {
     Q_OBJECT
 
+    Database &m_db;   // injected app DB connection (not owned)
+
 public:
-    explicit ScheduleManager(QObject *parent = nullptr);
+    explicit ScheduleManager(Database &db, QObject *parent = nullptr);
     ~ScheduleManager() override = default;
 
     // Provider registry

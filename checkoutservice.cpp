@@ -23,9 +23,10 @@
 #include <QDate>
 #include <QDateTime>
 
-CheckoutService::CheckoutService(InventoryManager *inventory,
+CheckoutService::CheckoutService(Database &db, InventoryManager *inventory,
                                  ReceiptPrinter *printer)
-    : m_inventory(inventory)
+    : m_db(db)
+    , m_inventory(inventory)
     , m_printer(printer)
 {
 }
@@ -73,10 +74,10 @@ CheckoutResult CheckoutService::finalizeSale(const Cart &cart,
     // live shift is wired into checkout (ShiftManager isn't on this path yet).
     request.cashier         = UserManager::instance().getCurrentUsername();
 
-    const int saleId = Database::instance().recordSale(request);
+    const int saleId = m_db.recordSale(request);
 
     if (saleId < 0) {
-        result.error = Database::instance().getLastError();
+        result.error = m_db.getLastError();
         return result;
     }
     result.ok     = true;
@@ -133,7 +134,7 @@ CheckoutResult CheckoutService::finalizeSale(const Cart &cart,
     receipt.amountPaid      = amountPaid;
     receipt.change          = change;
     receipt.customerName    = customerId > 0
-                                  ? Database::instance().getCustomerById(customerId).name
+                                  ? m_db.getCustomerById(customerId).name
                                   : QString();
     receipt.cashierName     =
         UserManager::instance().getCurrentUser().fullName;

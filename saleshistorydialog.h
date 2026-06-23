@@ -32,8 +32,10 @@ class SalesHistoryDialog : public QDialog
 {
     Q_OBJECT
 
+    Database &m_db;   // injected app DB connection (not owned)
+
 public:
-    explicit SalesHistoryDialog(QWidget *parent = nullptr);
+    explicit SalesHistoryDialog(Database &db, QWidget *parent = nullptr);
     ~SalesHistoryDialog();
 
 private slots:

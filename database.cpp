@@ -39,12 +39,6 @@
 #include <QCoreApplication>
 #include <functional>
 
-Database& Database::instance()
-{
-    static Database instance;
-    return instance;
-}
-
 Database::Database()
 {
     db = QSqlDatabase::addDatabase("QSQLITE");

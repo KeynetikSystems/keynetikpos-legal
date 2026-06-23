@@ -24,7 +24,10 @@ class DatabaseTest : public QObject
     Q_OBJECT
 
 private:
-    Database &dbi() { return Database::instance(); }
+    // The singleton is gone; the test owns its own Database. configureForTesting()
+    // (called in init()) repoints it at a fresh in-memory connection per test.
+    Database m_database;
+    Database &dbi() { return m_database; }
 
     // Adds a product and returns its generated id. costPrice/margin are chosen
     // so the computed selling price equals `price`.

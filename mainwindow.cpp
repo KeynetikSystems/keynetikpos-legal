@@ -176,15 +176,16 @@ static inline QPushButton *createStatusBarButton(const QString &label,
 // Constructor / Destructor
 // =============================================================================
 
-MainWindow::MainWindow(QWidget *parent)
+MainWindow::MainWindow(Database &db, QWidget *parent)
     : QMainWindow(parent)
+    , m_db(db)
     , receiptPrinter(new ReceiptPrinter())
 {
     // ── Database must initialise first — everything else depends on it ──────
-    if (!Database::instance().initialize()) {
+    if (!m_db.initialize()) {
         QMessageBox::critical(this, "Database Error",
                               "Failed to initialize database: "
-                                  + Database::instance().getLastError());
+                                  + m_db.getLastError());
         QApplication::quit();
         return;
     }
@@ -206,17 +207,17 @@ MainWindow::MainWindow(QWidget *parent)
         vat.setStandardRate(settingsManager->settings().taxRate);
     }
 
-    inventoryManager = new InventoryManager();
+    inventoryManager = new InventoryManager(m_db);
 
     // ── Schedule / messaging ────────────────────────────────────────────────
     // Object + table must exist now; provider wiring and the scheduler loop are
     // deferred (runDeferredStartup) so they don't delay first paint.
-    scheduleManager = new ScheduleManager(this);
+    scheduleManager = new ScheduleManager(m_db, this);
     scheduleManager->initDatabase();
 
     // ── Services (CartService creates the first cart itself) ───────────────
     cartService     = new CartService(this);
-    checkoutService = new CheckoutService(inventoryManager, receiptPrinter);
+    checkoutService = new CheckoutService(m_db, inventoryManager, receiptPrinter);
 
     // ── Theme ───────────────────────────────────────────────────────────────
     // Any theme change (from this window's menu or elsewhere) restyles the
@@ -393,7 +394,7 @@ void MainWindow::onBarcodeScanned(const QString &barcode)
     const QString code = barcode.trimmed();
 
     // ── 1. Database lookup ───────────────────────────────────────────────
-    Product product = Database::instance().getProductByBarcode(code);
+    Product product = m_db.getProductByBarcode(code);
 
     if (product.id <= 0) {
         const QString msg = QString("Unknown barcode: %1").arg(code);
@@ -579,14 +580,14 @@ void MainWindow::setupMenuBar()
     connect(financeMenu->addAction("Expenses..."),
             &QAction::triggered, this, [this]() {
         if (!checkLicenseTier(this, 3, "Expense Tracking")) return;
-        ExpenseDialog dlg(this);
+        ExpenseDialog dlg(m_db, this);
         dlg.exec();
     });
     financeMenu->addSeparator();
     connect(financeMenu->addAction("Customers..."),
             &QAction::triggered, this, [this]() {
         if (!checkLicenseTier(this, 3, "Customer Accounts")) return;
-        CustomerDialog dlg(this);
+        CustomerDialog dlg(m_db, this);
         dlg.exec();
     });
     financeMenu->addSeparator();
@@ -805,8 +806,8 @@ void MainWindow::setupCartPanel()
     layout->addLayout(customerRow);
 
     cartModel = new CartModel(cartService, this);
-    cartModel->setStockProvider([](int productId) {
-        return Database::instance().getProductById(productId).stockQuantity;
+    cartModel->setStockProvider([this](int productId) {
+        return m_db.getProductById(productId).stockQuantity;
     });
 
     cartTable = new QTableView();
@@ -940,11 +941,11 @@ void MainWindow::setupActionButtons()
 
 void MainWindow::loadProducts()
 {
-    productModel->setProducts(Database::instance().getAllProducts());
+    productModel->setProducts(m_db.getAllProducts());
 
     // Repopulate categories, preserving the cashier's current filter.
     const QString previous = categoryCombo->currentText();
-    QStringList categories = Database::instance().getAllCategories();
+    QStringList categories = m_db.getAllCategories();
     categoryCombo->blockSignals(true);
     categoryCombo->clear();
     categoryCombo->addItem("All Categories");
@@ -1087,7 +1088,7 @@ void MainWindow::onProductCardClicked(const QModelIndex &index)
         return;
 
     const int productId = index.data(ProductGridModel::ProductIdRole).toInt();
-    Product product = Database::instance().getProductById(productId);
+    Product product = m_db.getProductById(productId);
     if (product.id > 0 && product.stockQuantity > 0)
         addToCart(product, 1);
 }
@@ -1201,11 +1202,11 @@ void MainWindow::onCheckout()
     cartService->clearCurrent();
 
     for (int pid : soldProductIds)
-        productModel->updateStock(pid, Database::instance().getProductById(pid).stockQuantity);
+        productModel->updateStock(pid, m_db.getProductById(pid).stockQuantity);
 
     // A sale may push today's total over a configured sales-threshold schedule.
     scheduleManager->notifySalesThreshold(
-        Database::instance().getTotalSalesToday().toMajor());
+        m_db.getTotalSalesToday().toMajor());
 
     // Non-blocking success: a blocking dialog after every sale slows the queue.
     // Change due is the one figure the cashier must act on, so it stays in the
@@ -1216,7 +1217,7 @@ void MainWindow::onCheckout()
     if (redeemedPts > 0) {
         const Money creditValue = Money::fromCents(
             static_cast<qint64>(redeemedPts) * settingsManager->settings().loyaltyCentsPerPoint);
-        Database::instance().redeemLoyaltyPoints(
+        m_db.redeemLoyaltyPoints(
             paymentDialog.getCustomerId(), redeemedPts, creditValue);
     }
 
@@ -1481,7 +1482,7 @@ void MainWindow::onManageInventory()
         m_inventoryDlg->activateWindow();
         return;
     }
-    auto *dialog = new InventoryDialog(inventoryManager, this);
+    auto *dialog = new InventoryDialog(m_db, inventoryManager, this);
     dialog->setAttribute(Qt::WA_DeleteOnClose);
     m_inventoryDlg = dialog;
     connect(dialog, &QDialog::finished, this, [this](int) { loadProducts(); });
@@ -1494,7 +1495,7 @@ void MainWindow::onAddProduct()
 {
     if (!checkPermission(this, Permission::ADD_PRODUCTS, "add products"))
         return;
-    InventoryDialog dlg(inventoryManager, this);
+    InventoryDialog dlg(m_db, inventoryManager, this);
     dlg.exec();
     loadProducts();
     UserManager::instance().logUserAction("Add Product",
@@ -1518,7 +1519,7 @@ void MainWindow::onManageSuppliers()
 {
     if (!checkLicenseTier(this, 3, "Supplier Management")) return;
     if (!checkPermission(this, Permission::ADJUST_STOCK, "manage suppliers")) return;
-    SupplierDialog dlg(this);
+    SupplierDialog dlg(m_db, this);
     dlg.exec();
 }
 
@@ -1527,7 +1528,7 @@ void MainWindow::onManagePurchaseOrders()
     if (!checkLicenseTier(this, 3, "Purchase Orders")) return;
     if (!checkPermission(this, Permission::ADJUST_STOCK, "manage purchase orders"))
         return;
-    PurchaseOrderDialog dlg(this);
+    PurchaseOrderDialog dlg(m_db, this);
     dlg.exec();
     // Receiving a PO changes stock_quantity directly in the DB, so the grid
     // (which only learns about changes via updateStock()/checkout) needs an
@@ -1538,7 +1539,7 @@ void MainWindow::onManagePurchaseOrders()
 void MainWindow::onProcessRefund()
 {
     if (!checkPermission(this, Permission::ADJUST_STOCK, "process refunds")) return;
-    RefundDialog dlg(this);
+    RefundDialog dlg(m_db, this);
     dlg.exec();
     loadProducts();   // stock may have changed
 }
@@ -1546,7 +1547,7 @@ void MainWindow::onProcessRefund()
 void MainWindow::onStockTake()
 {
     if (!checkPermission(this, Permission::ADJUST_STOCK, "perform stock take")) return;
-    StockTakeDialog dlg(this);
+    StockTakeDialog dlg(m_db, this);
     dlg.exec();
     loadProducts();
 }
@@ -1558,7 +1559,7 @@ void MainWindow::onStockTake()
 void MainWindow::onSelectCustomer()
 {
     if (!checkLicenseTier(this, 3, "Customer Accounts")) return;
-    CustomerDialog dlg(this);
+    CustomerDialog dlg(m_db, this);
     dlg.exec();
     const Customer selected = dlg.getSelectedCustomer();
     if (selected.id <= 0) return;
@@ -1610,7 +1611,7 @@ void MainWindow::onShowAnalytics()
     if (!checkLicenseTier(this, 2, "Analytics Dashboard")) return;
     if (!checkPermission(this, Permission::VIEW_ANALYTICS, "view analytics"))
         return;
-    AnalyticsDashboard dashboard(this);
+    AnalyticsDashboard dashboard(m_db, this);
     dashboard.exec();
     UserManager::instance().logUserAction("Viewed Analytics",
                                           "Opened analytics dashboard");
@@ -1621,7 +1622,7 @@ void MainWindow::onShowReports()
     if (!checkLicenseTier(this, 2, "Reports")) return;
     if (!checkPermission(this, Permission::VIEW_REPORTS, "view reports"))
         return;
-    ReportsDialog dialog(this);
+    ReportsDialog dialog(m_db, this);
     dialog.exec();
     UserManager::instance().logUserAction("Viewed Reports",
                                           "Opened detailed reports dialog");
@@ -1637,7 +1638,7 @@ void MainWindow::onViewSalesHistory()
         m_salesHistoryDlg->activateWindow();
         return;
     }
-    auto *dialog = new SalesHistoryDialog(this);
+    auto *dialog = new SalesHistoryDialog(m_db, this);
     dialog->setAttribute(Qt::WA_DeleteOnClose);
     m_salesHistoryDlg = dialog;
     // Refunds restore stock, so refresh the grid when it closes.
@@ -1735,9 +1736,9 @@ void MainWindow::onDailyReport()
     if (!checkPermission(this, Permission::VIEW_REPORTS, "view reports"))
         return;
 
-    const Money  todaySales       = Database::instance().getTotalSalesToday();
+    const Money  todaySales       = m_db.getTotalSalesToday();
     const int    todayTransactions =
-        Database::instance().getTotalTransactionsToday();
+        m_db.getTotalTransactionsToday();
     const Money  average = Money::fromCents(
         todayTransactions > 0 ? todaySales.cents() / todayTransactions : 0);
 
@@ -1845,15 +1846,15 @@ void MainWindow::onBackupNow()
         return;
 
     QString path;
-    if (Database::instance().backupTo(Database::instance().backupDirectory(), &path)) {
-        Database::instance().rotateBackups(Database::instance().backupDirectory(), 10);
+    if (m_db.backupTo(m_db.backupDirectory(), &path)) {
+        m_db.rotateBackups(m_db.backupDirectory(), 10);
         statusLabel->setText("Backup created.");
         UserManager::instance().logUserAction("Backup", "Created manual backup: " + path);
         QMessageBox::information(this, "Backup Complete",
                                  QString("Database backed up to:\n%1").arg(path));
     } else {
         QMessageBox::warning(this, "Backup Failed",
-                             Database::instance().getLastError());
+                             m_db.getLastError());
     }
 }
 

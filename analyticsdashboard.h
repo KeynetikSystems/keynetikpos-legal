@@ -60,12 +60,16 @@ struct HourlySales {
 // ─────────────────────────────────────────────────────────────────────────────
 // AnalyticsDashboard
 // ─────────────────────────────────────────────────────────────────────────────
+class Database;
+
 class AnalyticsDashboard : public QDialog
 {
     Q_OBJECT
 
+    Database &m_db;   // injected app DB connection (not owned)
+
 public:
-    explicit AnalyticsDashboard(QWidget *parent = nullptr);
+    explicit AnalyticsDashboard(Database &db, QWidget *parent = nullptr);
     ~AnalyticsDashboard();
 
 private slots:

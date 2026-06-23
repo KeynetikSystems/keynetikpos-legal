@@ -18,8 +18,9 @@
 #include <QDebug>
 #include <QDateTime>
 
-InventoryManager::InventoryManager()
+InventoryManager::InventoryManager(Database &db)
     : QObject(nullptr)
+    , m_db(db)
     , refreshTimer(new QTimer(this))
 {
     loadInventoryCache();
@@ -38,7 +39,7 @@ InventoryInfo InventoryManager::getInventoryInfo(int productId)
     }
 
     // Load from database
-    Product product = Database::instance().getProductById(productId);
+    Product product = m_db.getProductById(productId);
 
     InventoryInfo info;
     info.productId = productId;
@@ -65,7 +66,7 @@ QVector<InventoryInfo> InventoryManager::getLowStockItems()
 {
     QVector<InventoryInfo> lowItems;
 
-    QVector<Product> products = Database::instance().getAllProducts();
+    QVector<Product> products = m_db.getAllProducts();
     for (const Product &p : products) {
         if (calculateStatus(p.stockQuantity, p.reorderLevel) == InventoryStatus::Low) {
             InventoryInfo info = getInventoryInfo(p.id);
@@ -80,7 +81,7 @@ QVector<InventoryInfo> InventoryManager::getCriticalStockItems()
 {
     QVector<InventoryInfo> criticalItems;
 
-    QVector<Product> products = Database::instance().getAllProducts();
+    QVector<Product> products = m_db.getAllProducts();
     for (const Product &p : products) {
         if (calculateStatus(p.stockQuantity, p.reorderLevel) == InventoryStatus::Critical) {
             InventoryInfo info = getInventoryInfo(p.id);
@@ -95,7 +96,7 @@ void InventoryManager::refreshAfterSale(int productId)
 {
     // Stock is decremented inside the checkout transaction (Database::recordSale);
     // here we only sync the cache and emit level warnings.
-    Product product = Database::instance().getProductById(productId);
+    Product product = m_db.getProductById(productId);
     if (product.id <= 0)
         return;
 
@@ -141,7 +142,7 @@ bool InventoryManager::restockProduct(int productId, int quantity, const QString
     }
 
     // Update cache
-    Product product = Database::instance().getProductById(productId);
+    Product product = m_db.getProductById(productId);
     if (cachedInventory.contains(productId)) {
         cachedInventory[productId].currentQuantity = product.stockQuantity;
         cachedInventory[productId].lastRestockDate = QDateTime::currentDateTime().toString("yyyy-MM-dd");
@@ -160,7 +161,7 @@ bool InventoryManager::restockProduct(int productId, int quantity, const QString
 bool InventoryManager::setReorderLevel(int productId, int level)
 {
     if (level < 0) level = 0;
-    if (!Database::instance().setReorderLevel(productId, level))
+    if (!m_db.setReorderLevel(productId, level))
         return false;
 
     if (cachedInventory.contains(productId)) {
@@ -248,7 +249,7 @@ void InventoryManager::loadInventoryCache()
 {
     cachedInventory.clear();
 
-    QVector<Product> products = Database::instance().getAllProducts();
+    QVector<Product> products = m_db.getAllProducts();
     for (const Product &p : products) {
         InventoryInfo info;
         info.productId = p.id;

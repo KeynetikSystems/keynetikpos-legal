@@ -43,8 +43,9 @@ static QString money2(Money m) { return QString::number(m.toMajor(), 'f', 2); }
 // Constructor / Destructor
 // ─────────────────────────────────────────────────────────────────────────────
 
-InventoryDialog::InventoryDialog(InventoryManager *manager, QWidget *parent)
+InventoryDialog::InventoryDialog(Database &db, InventoryManager *manager, QWidget *parent)
     : QDialog(parent)
+    , m_db(db)
     , inventoryManager(manager)
     // ── null-initialise every widget pointer up front ────────────────────────
     , tabWidget(nullptr)
@@ -530,7 +531,7 @@ void InventoryDialog::loadInventoryData()
     currentInventory.clear();
     previousInventory.clear();
 
-    QVector<Product> products = Database::instance().getAllProducts();
+    QVector<Product> products = m_db.getAllProducts();
     for (const Product &p : products) {
         InventoryInfo info = inventoryManager->getInventoryInfo(p.id);
         currentInventory.append(info);
@@ -564,7 +565,7 @@ void InventoryDialog::updateProductsList()
     int displayedRows = 0;
 
     for (const InventoryInfo &info : currentInventory) {
-        Product product = Database::instance().getProductById(info.productId);
+        Product product = m_db.getProductById(info.productId);
 
         if (!searchText.isEmpty()) {
             bool match = info.productName.toLower().contains(searchText) ||
@@ -732,7 +733,7 @@ void InventoryDialog::updateAnalytics()
     int    productCount = currentInventory.size();
 
     for (const InventoryInfo &info : std::as_const(currentInventory)) {
-        Product product = Database::instance().getProductById(info.productId);
+        Product product = m_db.getProductById(info.productId);
         totalValue += product.price * info.currentQuantity;
         totalStock += info.currentQuantity;
     }
@@ -786,7 +787,7 @@ void InventoryDialog::updateStockManagementTable()
     stockManagementTable->setRowCount(0);
 
     for (const InventoryInfo &info : currentInventory) {
-        Product product = Database::instance().getProductById(info.productId);
+        Product product = m_db.getProductById(info.productId);
 
         int row = stockManagementTable->rowCount();
         stockManagementTable->insertRow(row);
@@ -1031,7 +1032,7 @@ void InventoryDialog::onDeleteItemClicked()
 
     if (msgBox.exec() == QMessageBox::Yes) {
         if (productId > 0) {
-            if (Database::instance().deleteProduct(productId)) {
+            if (m_db.deleteProduct(productId)) {
                 stockManagementTable->removeRow(currentRow);
                 loadInventoryData();
                 showNotification(
@@ -1092,11 +1093,11 @@ void InventoryDialog::onSaveChangesClicked()
         product.isActive      = true;
 
         bool success = (productId > 0)
-                           ? Database::instance().updateProduct(product)
-                           : Database::instance().addProduct(product);
+                           ? m_db.updateProduct(product)
+                           : m_db.addProduct(product);
 
         if (!success && productId <= 0) {
-            Product np = Database::instance().getProductByBarcode(product.barcode);
+            Product np = m_db.getProductByBarcode(product.barcode);
             if (np.id > 0) {
                 stockManagementTable->item(row, 0)
                 ->setText(QString::number(np.id));
@@ -1179,7 +1180,7 @@ void InventoryDialog::onExportClicked()
     out << "Product ID,Product Name,Category,Barcode,"
            "Cost Price,Profit %,Selling Price,Stock Quantity,Status\n";
     for (const InventoryInfo &info : currentInventory) {
-        Product p = Database::instance().getProductById(info.productId);
+        Product p = m_db.getProductById(info.productId);
         out << info.productId << ",\"" << info.productName << "\",\""
             << info.category  << "\"," << p.barcode        << ","
             << money2(p.costPrice) << ","   << p.profitMargin   << ","
@@ -1346,8 +1347,8 @@ void InventoryDialog::onBulkAdjustClicked()
 
         if (newQty == oldQty) continue;
 
-        if (Database::instance().updateStock(info.productId, newQty)) {
-            Database::instance().logStockAdjustment(
+        if (m_db.updateStock(info.productId, newQty)) {
+            m_db.logStockAdjustment(
                 info.productId, info.productName,
                 oldQty, newQty, reason, adjustedBy);
             ++successCount;
@@ -1386,8 +1387,8 @@ void InventoryDialog::onQuickAdjustClicked(int productId)
         QLineEdit::Normal, "Manual correction", &ok);
     if (!ok) return;
 
-    if (Database::instance().updateStock(productId, newQty)) {
-        Database::instance().logStockAdjustment(
+    if (m_db.updateStock(productId, newQty)) {
+        m_db.logStockAdjustment(
             productId, info.productName,
             info.currentQuantity, newQty,
             reason.isEmpty() ? "Manual correction" : reason,
@@ -1404,7 +1405,7 @@ void InventoryDialog::onQuickAdjustClicked(int productId)
 void InventoryDialog::onViewHistoryClicked(int productId)
 {
     InventoryInfo info = inventoryManager->getInventoryInfo(productId);
-    auto history = Database::instance().getStockHistory(productId, 50);
+    auto history = m_db.getStockHistory(productId, 50);
 
     QDialog dlg(this);
     dlg.setWindowTitle(QString("Stock History — %1").arg(info.productName));
@@ -1541,7 +1542,7 @@ void InventoryDialog::onImportClicked()
         p.barcode       = barcode;
         p.isActive      = true;
 
-        if (Database::instance().addProduct(p)) {
+        if (m_db.addProduct(p)) {
             ++imported;
         } else {
             ++errors;
@@ -1575,7 +1576,7 @@ void InventoryDialog::onPrintClicked()
                        "<p>Generated: " + QDateTime::currentDateTime().toString("yyyy-MM-dd hh:mm:ss") + "</p>"
                                                                                         "<table border='1' cellpadding='6'><tr><th>Product</th><th>Category</th><th>Price</th><th>Stock</th><th>Status</th></tr>";
         for (const InventoryInfo &info : currentInventory) {
-            Product p = Database::instance().getProductById(info.productId);
+            Product p = m_db.getProductById(info.productId);
             html += QString("<tr><td>%1</td><td>%2</td><td>%3</td><td>%4</td><td>%5</td></tr>")
                         .arg(info.productName, info.category, formatCurrency(p.price),
                              QString::number(info.currentQuantity),

@@ -7,8 +7,9 @@
 #include <QMessageBox>
 #include <QFormLayout>
 
-RefundDialog::RefundDialog(QWidget *parent)
+RefundDialog::RefundDialog(Database &db, QWidget *parent)
     : QDialog(parent)
+    , m_db(db)
 {
     if (!UserManager::instance().hasPermission(Permission::ADJUST_STOCK)) {
         QMessageBox::warning(nullptr, "Access Denied",
@@ -110,7 +111,7 @@ void RefundDialog::setupUI()
 void RefundDialog::onLoadSale()
 {
     const int id = saleIdSpin->value();
-    Sale sale = Database::instance().getSaleById(id);
+    Sale sale = m_db.getSaleById(id);
 
     if (sale.id <= 0) {
         QMessageBox::warning(this, "Sale Not Found",
@@ -121,9 +122,9 @@ void RefundDialog::onLoadSale()
 
     m_loadedSaleId = id;
     populateSaleInfo(sale);
-    populateSaleItems(Database::instance().getSaleItems(id));
+    populateSaleItems(m_db.getSaleItems(id));
 
-    const bool alreadyRefunded = Database::instance().isRefunded(id);
+    const bool alreadyRefunded = m_db.isRefunded(id);
     refundedLabel->setVisible(alreadyRefunded);
     refundButton->setEnabled(!alreadyRefunded);
     setSaleLoaded(true);
@@ -184,9 +185,9 @@ void RefundDialog::onProcessRefund()
 
     const QString cashier = UserManager::instance().getCurrentUser().fullName;
 
-    if (!Database::instance().processRefund(m_loadedSaleId, reason, cashier)) {
+    if (!m_db.processRefund(m_loadedSaleId, reason, cashier)) {
         QMessageBox::critical(this, "Refund Failed",
-            "Could not process refund: " + Database::instance().getLastError());
+            "Could not process refund: " + m_db.getLastError());
         return;
     }
 
