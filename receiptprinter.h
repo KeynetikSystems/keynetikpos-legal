@@ -84,6 +84,8 @@ public:
     Receipt getLastReceipt();
     bool isConfigured() const;
     QString getLastError() const;
+    // Filesystem path of the most recently saved receipt PDF (empty if none).
+    QString getLastSavedPath() const { return lastSavedPath; }
 
 private:
     QString generateReceiptText(const Receipt &receipt);
@@ -107,6 +109,7 @@ private:
     SmtpConfig smtpConfig;
     Receipt lastReceipt;
     QString lastError;
+    QString lastSavedPath;
     QSettings settings;
 };
 

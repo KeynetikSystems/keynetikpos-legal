@@ -14,10 +14,12 @@
 #include "receiptprinter.h"
 #include "cart.h"          // formatMoney()
 #include "smtpclient.h"
-#include <QFileDialog>
 #include <QTextStream>
 #include <QDebug>
-#include <QMessageBox>
+#include <QPainter>
+#include <QFont>
+#include <QFileInfo>
+#include <QAbstractTextDocumentLayout>
 
 ReceiptPrinter::ReceiptPrinter()
     : printerType(PDFExport)  // Default to PDF
@@ -170,98 +172,99 @@ QString ReceiptPrinter::generateReceiptText(const Receipt &receipt)
 
 QString ReceiptPrinter::generateReceiptHTML(const Receipt &receipt)
 {
+    // NOTE: QTextDocument (used for the PDF) ignores <style> blocks and CSS
+    // classes — it only honours INLINE style="" attributes and a handful of
+    // element attributes (align/valign/width). Email clients also render inline
+    // styles most reliably. So everything here is styled inline. All
+    // user/product text is HTML-escaped so a stray '&' or '<' can't break the
+    // layout.
+    auto esc = [](const QString &s) { return s.toHtmlEscaped(); };
+    const QString HR =
+        "<div style=\"border-top:1px dashed #000; margin:6px 0; height:0;\"></div>";
+
     QString html;
     QTextStream stream(&html);
 
-    stream << "<!DOCTYPE html><html><head><meta charset='utf-8'><style>";
-    stream << "body { font-family: 'Courier New', monospace; width: 80mm; margin: 10mm auto; }";
-    stream << "h1, h2, p { text-align: center; margin: 5px 0; }";
-    stream << "h1 { font-size: 16pt; font-weight: bold; }";
-    stream << "table { width: 100%; border-collapse: collapse; margin: 10px 0; }";
-    stream << "th, td { text-align: left; padding: 5px; font-size: 10pt; }";
-    stream << "th { border-bottom: 2px solid #000; font-weight: bold; }";
-    stream << ".right { text-align: right; }";
-    stream << ".center { text-align: center; }";
-    stream << ".total { font-size: 12pt; font-weight: bold; border-top: 2px solid #000; }";
-    stream << ".hr { border-top: 1px dashed #000; margin: 10px 0; }";
-    stream << ".small { font-size: 8pt; color: #666; }";
-    stream << "</style></head><body>";
+    stream << "<html><body style=\"font-family:'Courier New',monospace; "
+              "font-size:10pt; color:#000;\">";
 
-    // Header
-    stream << "<h1>" << companyName << "</h1>";
-    stream << "<p>" << companyAddress << "</p>";
-    stream << "<p>Tel: " << companyPhone << "</p>";
-    stream << "<p class='small'>TAX ID: " << companyTaxId << "</p>";
-    stream << "<div class='hr'></div>";
+    // ── Header (centred) ────────────────────────────────────────────────────
+    stream << "<div style=\"text-align:center;\">";
+    stream << "<div style=\"font-size:15pt; font-weight:bold;\">" << esc(companyName) << "</div>";
+    if (!companyAddress.isEmpty())
+        stream << "<div>" << esc(companyAddress) << "</div>";
+    if (!companyPhone.isEmpty())
+        stream << "<div>Tel: " << esc(companyPhone) << "</div>";
+    if (!companyTaxId.isEmpty())
+        stream << "<div style=\"font-size:8pt; color:#444;\">TAX ID: " << esc(companyTaxId) << "</div>";
+    stream << "</div>";
+    stream << HR;
 
-    // Sale info
-    stream << "<p><strong>Receipt #" << receipt.saleId << "</strong></p>";
-    stream << "<p class='small'>" << receipt.dateTime.toString("yyyy-MM-dd hh:mm:ss") << "</p>";
-    if (!receipt.customerName.isEmpty()) {
-        stream << "<p class='small'><strong>Customer:</strong> " << receipt.customerName << "</p>";
-    }
-    if (!receipt.cashierName.isEmpty()) {
-        stream << "<p class='small'><strong>Cashier:</strong> " << receipt.cashierName << "</p>";
-    }
-    stream << "<div class='hr'></div>";
+    // ── Sale info ───────────────────────────────────────────────────────────
+    stream << "<div style=\"font-weight:bold;\">Receipt #" << receipt.saleId << "</div>";
+    stream << "<div style=\"font-size:8pt; color:#444;\">"
+           << esc(receipt.dateTime.toString("yyyy-MM-dd hh:mm:ss")) << "</div>";
+    if (!receipt.customerName.isEmpty())
+        stream << "<div style=\"font-size:8pt;\">Customer: " << esc(receipt.customerName) << "</div>";
+    if (!receipt.cashierName.isEmpty())
+        stream << "<div style=\"font-size:8pt;\">Cashier: " << esc(receipt.cashierName) << "</div>";
+    stream << HR;
 
-    // Items table
-    stream << "<table>";
-    stream << "<tr><th>Item</th><th class='center'>Qty</th><th class='right'>Total</th></tr>";
-
+    // ── Items ───────────────────────────────────────────────────────────────
+    stream << "<table width=\"100%\" cellspacing=\"0\" cellpadding=\"2\" "
+              "style=\"font-size:9pt;\">";
+    stream << "<tr style=\"font-weight:bold;\">"
+              "<td width=\"58%\">Item</td>"
+              "<td width=\"12%\" align=\"center\">Qty</td>"
+              "<td width=\"30%\" align=\"right\">Amount</td></tr>";
     for (const CartItem &item : receipt.items) {
         stream << "<tr>";
-        stream << "<td>" << item.name << "<br><span class='small'>@ " << formatCurrency(item.price) << "</span></td>";
-        stream << "<td class='center'>" << item.quantity << "</td>";
-        stream << "<td class='right'>" << formatCurrency(item.getSubtotal()) << "</td>";
+        stream << "<td valign=\"top\">" << esc(item.name)
+               << "<br><span style=\"font-size:7.5pt; color:#555;\">@ "
+               << formatCurrency(item.price) << "</span></td>";
+        stream << "<td valign=\"top\" align=\"center\">" << item.quantity << "</td>";
+        stream << "<td valign=\"top\" align=\"right\">" << formatCurrency(item.getSubtotal()) << "</td>";
         stream << "</tr>";
     }
-
     stream << "</table>";
-    stream << "<div class='hr'></div>";
+    stream << HR;
 
-    // Totals
-    stream << "<table>";
-    stream << "<tr><td>Subtotal:</td><td class='right'>" << formatCurrency(receipt.subtotal) << "</td></tr>";
-    stream << "<tr><td>Tax (16%):</td><td class='right'>" << formatCurrency(receipt.tax) << "</td></tr>";
-
+    // ── Totals ──────────────────────────────────────────────────────────────
+    stream << "<table width=\"100%\" cellspacing=\"0\" cellpadding=\"1\" style=\"font-size:9.5pt;\">";
+    stream << "<tr><td>Subtotal</td><td align=\"right\">" << formatCurrency(receipt.subtotal) << "</td></tr>";
+    stream << "<tr><td>Tax</td><td align=\"right\">" << formatCurrency(receipt.tax) << "</td></tr>";
     if (receipt.discount.cents() > 0) {
-        stream << "<tr><td>Discount:";
-        if (!receipt.discountReason.isEmpty()) {
-            stream << "<br><span class='small'>(" << receipt.discountReason << ")</span>";
-        }
-        stream << "</td><td class='right'>-" << formatCurrency(receipt.discount) << "</td></tr>";
+        stream << "<tr><td>Discount";
+        if (!receipt.discountReason.isEmpty())
+            stream << " <span style=\"font-size:7.5pt; color:#555;\">(" << esc(receipt.discountReason) << ")</span>";
+        stream << "</td><td align=\"right\">-" << formatCurrency(receipt.discount) << "</td></tr>";
     }
-
-    stream << "<tr class='total'><td><strong>TOTAL:</strong></td><td class='right'><strong>"
-           << formatCurrency(receipt.total) << "</strong></td></tr>";
+    stream << "<tr style=\"font-weight:bold; font-size:12pt;\">"
+              "<td>TOTAL</td><td align=\"right\">" << formatCurrency(receipt.total) << "</td></tr>";
     stream << "</table>";
+    stream << HR;
 
-    // Payment
-    stream << "<div class='hr'></div>";
-    stream << "<table>";
-    stream << "<tr><td>Payment Method:</td><td class='right'>" << receipt.paymentMethod << "</td></tr>";
+    // ── Payment ─────────────────────────────────────────────────────────────
+    stream << "<table width=\"100%\" cellspacing=\"0\" cellpadding=\"1\" style=\"font-size:9.5pt;\">";
+    stream << "<tr><td>Payment</td><td align=\"right\">" << esc(receipt.paymentMethod) << "</td></tr>";
     if (!receipt.referenceNumber.isEmpty())
-        stream << "<tr><td>Reference:</td><td class='right'>"
-               << receipt.referenceNumber.toHtmlEscaped() << "</td></tr>";
-    stream << "<tr><td>Amount Paid:</td><td class='right'>" << formatCurrency(receipt.amountPaid) << "</td></tr>";
-    if (receipt.change.cents() > 0) {
-        stream << "<tr><td><strong>Change:</strong></td><td class='right'><strong>"
-               << formatCurrency(receipt.change) << "</strong></td></tr>";
-    }
+        stream << "<tr><td>Reference</td><td align=\"right\">" << esc(receipt.referenceNumber) << "</td></tr>";
+    stream << "<tr><td>Amount Paid</td><td align=\"right\">" << formatCurrency(receipt.amountPaid) << "</td></tr>";
+    if (receipt.change.cents() > 0)
+        stream << "<tr style=\"font-weight:bold;\"><td>Change</td><td align=\"right\">"
+               << formatCurrency(receipt.change) << "</td></tr>";
     stream << "</table>";
+    stream << HR;
 
-    // Footer
-    stream << "<div class='hr'></div>";
-    QStringList footerLines = receiptFooter.split('\n');
-    for (const QString &line : footerLines) {
-        stream << "<p class='center'>" << line << "</p>";
-    }
-
-    stream << "<p class='center small'>Powered by Keynetik POS</p>";
+    // ── Footer (centred) ────────────────────────────────────────────────────
+    stream << "<div style=\"text-align:center;\">";
+    const QStringList footerLines = receiptFooter.split('\n');
+    for (const QString &line : footerLines)
+        stream << "<div>" << esc(line) << "</div>";
+    stream << "<div style=\"font-size:7.5pt; color:#666; margin-top:6px;\">Powered by KeynetikPOS</div>";
+    stream << "</div>";
 
     stream << "</body></html>";
-
     return html;
 }
 
@@ -281,30 +284,67 @@ bool ReceiptPrinter::printToStandard(const QString &receiptHTML)
 
 bool ReceiptPrinter::saveToPDF(const QString &receiptHTML, const QString &filename)
 {
-    // Auto-save to Documents/Receipts folder
-    QString receiptsDir = QStandardPaths::writableLocation(QStandardPaths::DocumentsLocation) + "/KeynetikPOS/Receipts";
+    // Auto-save to Documents/KeynetikPOS/Receipts.
+    const QString receiptsDir =
+        QStandardPaths::writableLocation(QStandardPaths::DocumentsLocation)
+        + "/KeynetikPOS/Receipts";
     QDir dir;
-    if (!dir.exists(receiptsDir)) {
-        dir.mkpath(receiptsDir);
+    if (!dir.exists(receiptsDir) && !dir.mkpath(receiptsDir)) {
+        lastError = "Could not create the receipts folder: " + receiptsDir;
+        qWarning() << lastError;
+        return false;
     }
+    const QString filepath = receiptsDir + "/" + filename;
 
-    QString filepath = receiptsDir + "/" + filename;
+    // Thermal-style roll: a fixed 80 mm width with the page HEIGHT driven by the
+    // content, so a short receipt isn't stranded on an A4-tall page and nothing
+    // is clipped off the right edge. We lay the document out at the content
+    // width, measure it, size the page to fit, then paint it once (no
+    // pagination, no second blank page).
+    const double widthMM    = 80.0;
+    const double marginMM   = 5.0;
+    const double contentWmm = widthMM - 2 * marginMM;
 
     QPrinter printer(QPrinter::HighResolution);
     printer.setOutputFormat(QPrinter::PdfFormat);
     printer.setOutputFileName(filepath);
-    printer.setPageSize(QPageSize(QSizeF(80, 297), QPageSize::Millimeter)); // Thermal receipt size
+    printer.setFullPage(true);   // we apply our own margins via the painter
 
-    QTextDocument document;
-    document.setHtml(receiptHTML);
-    document.print(&printer);
+    const double pxPerMM = printer.resolution() / 25.4;
 
+    QTextDocument doc;
+    // Lay the document out using the PRINTER's resolution, not the screen's —
+    // otherwise font metrics and doc.size() are measured at ~96 dpi while we
+    // scale by the printer's ~1200 dpi, collapsing the page to a sliver.
+    doc.documentLayout()->setPaintDevice(&printer);
+    doc.setDocumentMargin(0);
+    doc.setDefaultFont(QFont("Courier New", 9));
+    doc.setHtml(receiptHTML);
+    doc.setTextWidth(contentWmm * pxPerMM);
+
+    const double contentHmm = doc.size().height() / pxPerMM;
+    const double pageHmm    = contentHmm + 2 * marginMM;
+    printer.setPageSize(QPageSize(QSizeF(widthMM, pageHmm), QPageSize::Millimeter));
+
+    QPainter painter;
+    if (!painter.begin(&printer)) {
+        lastError = "Could not open the receipt PDF for writing: " + filepath;
+        qWarning() << lastError;
+        return false;
+    }
+    painter.translate(marginMM * pxPerMM, marginMM * pxPerMM);
+    doc.drawContents(&painter);
+    painter.end();
+
+    if (!QFileInfo::exists(filepath) || QFileInfo(filepath).size() == 0) {
+        lastError = "The receipt PDF could not be saved: " + filepath;
+        qWarning() << lastError;
+        return false;
+    }
+
+    lastSavedPath = filepath;
+    lastError.clear();
     qDebug() << "Receipt saved to:" << filepath;
-
-    // Show confirmation
-    QMessageBox::information(nullptr, "Receipt Saved",
-                             QString("Receipt saved to:\n%1").arg(filepath));
-
     return true;
 }
 
