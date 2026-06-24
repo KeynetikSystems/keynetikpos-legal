@@ -4,6 +4,7 @@
 #include "vatdialog.h"
 #include "vat.h"
 #include "cart.h"      // formatMoney()
+#include "colorscheme.h"
 
 #include <QVBoxLayout>
 #include <QHBoxLayout>
@@ -105,7 +106,9 @@ VatDialog::VatDialog(Vat *vat, QWidget *parent)
     // (padding + 2px border) aren't vertically clipped — which made them look
     // like empty boxes.
     m_prodTable->verticalHeader()->setVisible(false);
-    m_prodTable->verticalHeader()->setDefaultSectionSize(42);
+    // Roomy rows: the styled combo is ~34px tall, so give it clear air above and
+    // below rather than filling the row edge-to-edge.
+    m_prodTable->verticalHeader()->setDefaultSectionSize(52);
     m_prodTable->setSelectionMode(QAbstractItemView::NoSelection);
     m_prodTable->setFocusPolicy(Qt::NoFocus);
     codeLay->addWidget(m_prodTable);
@@ -172,6 +175,17 @@ void VatDialog::refreshProducts()
         m_prodTable->setItem(r, 0, new QTableWidgetItem(q.value(1).toString()));
 
         auto *combo = new QComboBox();
+        // Give the combo a real height: the global QComboBox style adds 6px
+        // padding + 2px border, which left too little interior for the 11pt
+        // label and clipped it (it looked washed-out / dashed). A fixed
+        // min-height with trimmed vertical padding gives the text full room.
+        const ColorScheme cs = getColorScheme();
+        combo->setMinimumHeight(34);
+        combo->setStyleSheet(QString(
+            "QComboBox { color:%1; background:%2; border:1px solid %3;"
+            " border-radius:4px; padding:2px 8px; min-height:30px; }"
+            "QComboBox QAbstractItemView { color:%1; background:%2; }")
+            .arg(cs.textPrimary, cs.inputBg, cs.borderColor));
         combo->addItem(taxCodeLabel(TaxCode::Standard), int(TaxCode::Standard));
         combo->addItem(taxCodeLabel(TaxCode::Zero),     int(TaxCode::Zero));
         combo->addItem(taxCodeLabel(TaxCode::Exempt),   int(TaxCode::Exempt));
@@ -185,7 +199,7 @@ void VatDialog::refreshProducts()
         // than butting against the grid lines.
         auto *cell = new QWidget();
         auto *cellLay = new QHBoxLayout(cell);
-        cellLay->setContentsMargins(6, 4, 6, 4);
+        cellLay->setContentsMargins(6, 9, 6, 9);
         cellLay->addWidget(combo);
         m_prodTable->setCellWidget(r, 1, cell);
     }
