@@ -156,7 +156,10 @@ QSize ProductCardDelegate::sizeHint(const QStyleOptionViewItem &option,
     // Scale the card with the active font/DPI instead of a fixed pixel size so
     // the grid stays legible on small cashier displays and crisp on hi-DPI.
     const QFontMetrics fm(option.font);
-    const int minW = qMax(170, fm.averageCharWidth() * 24);
+    // Min card width tuned so a typical cashier window fits ~6 columns; the grid
+    // stays responsive (fewer columns on a narrow screen, more on a wide one)
+    // since the column count below is derived from this width vs. the viewport.
+    const int minW = qMax(150, fm.averageCharWidth() * 20);
     const int h    = qMax(96,  fm.height() * 5);
 
     // Stretch the card width so a full row of cards exactly fills the

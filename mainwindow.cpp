@@ -459,8 +459,13 @@ void MainWindow::setupUI()
     setupCartPanel();
     splitter->addWidget(cartPanel);
 
-    splitter->setStretchFactor(0, 2);
+    // Give the catalogue ~3/4 of the window and the cart ~1/4: the cart only
+    // shows a summary, so a 2:1 split left it half-empty and squeezed the grid.
+    // setSizes pins the start ratio; the stretch factors keep it on resize.
+    // Still user-draggable (childrenCollapsible is off).
+    splitter->setStretchFactor(0, 3);
     splitter->setStretchFactor(1, 1);
+    splitter->setSizes({ 1050, 350 });
     mainLayout->addWidget(splitter);
 
     setupMenuBar();
@@ -748,7 +753,11 @@ void MainWindow::setupProductsPanel()
     productView->setViewMode(QListView::IconMode);
     productView->setResizeMode(QListView::Adjust);
     productView->setMovement(QListView::Static);
-    productView->setUniformItemSizes(true);
+    // NOTE: uniformItemSizes MUST stay off here. The card delegate's sizeHint
+    // stretches each card so a full row exactly fills the viewport width (fitting
+    // as many columns as possible); uniformItemSizes caches one fixed width and
+    // defeats that, leaving a dead gap to the right of the grid.
+    productView->setUniformItemSizes(false);
     productView->setSpacing(8);
     // SingleSelection (not NoSelection) so the arrow keys move a current item;
     // the delegate shades the selected card. Disabled (out-of-stock) cards are
