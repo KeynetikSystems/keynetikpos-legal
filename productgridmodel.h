@@ -52,6 +52,14 @@ public:
     // No-op if the product isn't currently loaded.
     void updateStock(int productId, int newQty);
 
+    // Reconciles the loaded set against `products` by id: rows missing from
+    // `products` are removed, rows present in both get a dataChanged if any
+    // displayed field changed, and rows new to `products` are appended — all
+    // via targeted begin/end signals, never a full reset. For periodic
+    // background refreshes (e.g. picking up a product another device just
+    // added) where preserving scroll position/selection matters.
+    void syncProducts(const QVector<Product> &products);
+
     int      rowCount(const QModelIndex &parent = QModelIndex()) const override;
     QVariant data(const QModelIndex &index, int role) const override;
     Qt::ItemFlags flags(const QModelIndex &index) const override;

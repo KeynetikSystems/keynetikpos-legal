@@ -1,0 +1,112 @@
+[
+  {
+    "name": "noTax_simple",
+    "subtotalCents": 10000,
+    "discountCents": 0,
+    "taxEnabled": false,
+    "taxRate": 0.0,
+    "taxInclusive": false,
+    "expectDiscountCents": 0,
+    "expectTaxCents": 0,
+    "expectTotalCents": 10000
+  },
+  {
+    "name": "noTax_withDiscount",
+    "subtotalCents": 10000,
+    "discountCents": 1500,
+    "taxEnabled": false,
+    "taxRate": 0.0,
+    "taxInclusive": false,
+    "expectDiscountCents": 1500,
+    "expectTaxCents": 0,
+    "expectTotalCents": 8500
+  },
+  {
+    "name": "discount_clampedToSubtotal",
+    "subtotalCents": 5000,
+    "discountCents": 8000,
+    "taxEnabled": false,
+    "taxRate": 0.0,
+    "taxInclusive": false,
+    "expectDiscountCents": 5000,
+    "expectTaxCents": 0,
+    "expectTotalCents": 0
+  },
+  {
+    "name": "discount_negativeClampedToZero",
+    "subtotalCents": 5000,
+    "discountCents": -1000,
+    "taxEnabled": false,
+    "taxRate": 0.0,
+    "taxInclusive": false,
+    "expectDiscountCents": 0,
+    "expectTaxCents": 0,
+    "expectTotalCents": 5000
+  },
+  {
+    "name": "taxEnabledButZeroRate_noTax",
+    "subtotalCents": 10000,
+    "discountCents": 0,
+    "taxEnabled": true,
+    "taxRate": 0.0,
+    "taxInclusive": false,
+    "expectDiscountCents": 0,
+    "expectTaxCents": 0,
+    "expectTotalCents": 10000
+  },
+  {
+    "name": "exclusiveTax_addsOnTop",
+    "subtotalCents": 10000,
+    "discountCents": 0,
+    "taxEnabled": true,
+    "taxRate": 0.16,
+    "taxInclusive": false,
+    "expectDiscountCents": 0,
+    "expectTaxCents": 1600,
+    "expectTotalCents": 11600
+  },
+  {
+    "name": "exclusiveTax_withDiscountUsesNetBase",
+    "subtotalCents": 20000,
+    "discountCents": 5000,
+    "taxEnabled": true,
+    "taxRate": 0.16,
+    "taxInclusive": false,
+    "expectDiscountCents": 5000,
+    "expectTaxCents": 2400,
+    "expectTotalCents": 17400
+  },
+  {
+    "name": "inclusiveTax_backCalculates",
+    "subtotalCents": 11600,
+    "discountCents": 0,
+    "taxEnabled": true,
+    "taxRate": 0.16,
+    "taxInclusive": true,
+    "expectDiscountCents": 0,
+    "expectTaxCents": 1600,
+    "expectTotalCents": 11600
+  },
+  {
+    "name": "exclusiveTax_componentsReconcileExactly",
+    "subtotalCents": 1999,
+    "discountCents": 250,
+    "taxEnabled": true,
+    "taxRate": 0.16,
+    "taxInclusive": false,
+    "expectDiscountCents": 250,
+    "expectTaxCents": 280,
+    "expectTotalCents": 2029
+  },
+  {
+    "name": "exclusiveTax_exactHalfCentRoundsAwayFromZero",
+    "subtotalCents": 50,
+    "discountCents": 0,
+    "taxEnabled": true,
+    "taxRate": 0.01,
+    "taxInclusive": false,
+    "expectDiscountCents": 0,
+    "expectTaxCents": 1,
+    "expectTotalCents": 51
+  }
+]

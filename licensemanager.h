@@ -23,6 +23,7 @@
 #include <QString>
 #include <QStringList>
 #include <QDateTime>
+#include <QDate>
 #include <QWidget>
 
 enum class LicenseState {
@@ -121,6 +122,17 @@ public:
     bool         hasFeature(const QString &feature)  const;
     QStringList  features()                          const;
 
+    // Update entitlement — separate from license validity. The license
+    // itself is perpetual once activated (see LicenseState); this is only
+    // the date past which the server stops offering new version updates for
+    // this key until it's renewed (see license-server's POST /admin/renew
+    // and the M-Pesa self-serve renewal path). An invalid/null QDate means
+    // "no expiry known" — either updates are included forever (most keys, and
+    // always POS Core), or this is a trial/legacy install the server hasn't
+    // told us about yet. Nothing in LicenseManager itself acts on this date;
+    // it exists so callers (an About/Settings screen) can display it.
+    QDate        updatesValidUntil()                 const;
+
 private:
     LicenseManager() = default;
 
@@ -158,9 +170,15 @@ private:
     void        writeStoredTier(int tier) const;
     QStringList readStoredFeatures() const;
     void        writeStoredFeatures(const QStringList &features) const;
+    QDate       readStoredUpdatesUntil()  const;
+    void        writeStoredUpdatesUntil(const QDate &date) const;
 
-    // Apply a server-supplied tier + feature list (shared by activate + heartbeat)
-    void        applyServerTier(int tier, const QStringList &features);
+    // Apply a server-supplied tier + feature list + update-entitlement date
+    // (shared by activate + heartbeat). updatesUntil is null when the server
+    // didn't send one (meaning "unchanged" — a heartbeat that omits the field
+    // does not clear a previously-known date).
+    void        applyServerTier(int tier, const QStringList &features,
+                                const QDate &updatesUntil = QDate());
 
     // ── Recovery code ────────────────────────────────────────────
     QString   readStoredRecoveryHash()             const;
@@ -177,6 +195,7 @@ private:
 
     int          m_tier     = 1;          // effective tier for this session
     QStringList  m_features;              // individual feature slugs from server
+    QDate        m_updatesUntil;          // update entitlement date; null = unknown/forever
 
     QString      m_recoveryCodePlain;     // non-empty only during the launch it was generated
     bool         m_recoveryCodeGenerated = false;

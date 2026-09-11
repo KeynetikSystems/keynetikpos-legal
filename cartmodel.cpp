@@ -100,19 +100,33 @@ QVariant CartModel::data(const QModelIndex &index, int role) const
         break;
 
     case Qt::FontRole:
-        if (index.column() == ColProduct ||
-            index.column() == ColDec || index.column() == ColInc) {
+        if (index.column() == ColDec || index.column() == ColInc) {
+            // Larger than the surrounding table text so the tap targets read
+            // as buttons at a glance, not just column labels.
+            QFont f;
+            f.setBold(true);
+            f.setPointSize(f.pointSize() + 4);
+            return f;
+        }
+        if (index.column() == ColProduct) {
             QFont f;
             f.setBold(true);
             return f;
         }
         break;
 
+    case Qt::BackgroundRole:
+        if (index.column() == ColDec)
+            return QBrush(QColor(getColorScheme().accentPrimary));   // green
+        if (index.column() == ColInc)
+            return QBrush(QColor(getColorScheme().accentTertiary));  // mauve/purple
+        break;
+
     case Qt::ForegroundRole:
         if (index.column() == ColRemove)
             return QBrush(QColor(getColorScheme().error));
         if (index.column() == ColDec || index.column() == ColInc)
-            return QBrush(QColor(getColorScheme().accentPrimary));
+            return QBrush(Qt::white);
         break;
 
     case Qt::ToolTipRole:

@@ -12,6 +12,7 @@
 #include "analyticsdashboard.h"
 #include "colorscheme.h"
 #include "database.h"
+#include "salesanalyticsrepository.h"
 #include "cart.h"          // formatMoney()
 #include <QVBoxLayout>
 #include <QHBoxLayout>
@@ -320,7 +321,7 @@ SalesMetrics AnalyticsDashboard::calculateMetrics()
         metrics.itemsSold = query.value("total_items").toInt();
 
     metrics.totalProfit =
-        m_db.getActualGrossProfit(startDate.date(), endDate.date());
+        m_db.salesAnalytics().getActualGrossProfit(startDate.date(), endDate.date());
 
     return metrics;
 }

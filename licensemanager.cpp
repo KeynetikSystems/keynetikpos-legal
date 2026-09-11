@@ -144,6 +144,15 @@ void LicenseManager::writeStoredFeatures(const QStringList &f) const {
     QSettings s(QSettings::NativeFormat, QSettings::UserScope, REG_ORG, REG_APP);
     s.setValue("License/Features", f);
 }
+QDate LicenseManager::readStoredUpdatesUntil() const {
+    QSettings s(QSettings::NativeFormat, QSettings::UserScope, REG_ORG, REG_APP);
+    const QString iso = s.value("License/UpdatesUntil", "").toString();
+    return iso.isEmpty() ? QDate() : QDate::fromString(iso, Qt::ISODate);
+}
+void LicenseManager::writeStoredUpdatesUntil(const QDate &date) const {
+    QSettings s(QSettings::NativeFormat, QSettings::UserScope, REG_ORG, REG_APP);
+    s.setValue("License/UpdatesUntil", date.isValid() ? date.toString(Qt::ISODate) : "");
+}
 
 // Build the canonical feature list for a given tier (used when the server
 // doesn't return an explicit feature array — e.g. legacy keys or local-only).
@@ -164,11 +173,18 @@ static QStringList featuresForTier(int tier) {
     return f;
 }
 
-void LicenseManager::applyServerTier(int t, const QStringList &feats) {
+void LicenseManager::applyServerTier(int t, const QStringList &feats, const QDate &updatesUntil) {
     m_tier     = t;
     m_features = feats.isEmpty() ? featuresForTier(t) : feats;
     writeStoredTier(t);
     writeStoredFeatures(m_features);
+    // A response that omits updatesUntil (an older server, or a key with no
+    // renewal history) leaves the previously-known date alone rather than
+    // wiping it — only an explicit date from the server updates it.
+    if (updatesUntil.isValid()) {
+        m_updatesUntil = updatesUntil;
+        writeStoredUpdatesUntil(updatesUntil);
+    }
 }
 
 // ════════════════════════════════════════════════════════════════
@@ -340,12 +356,13 @@ void LicenseManager::startOnlineHeartbeat() {
             m_offlineDaysRemaining = MAX_OFFLINE_DAYS;
             m_offlineGraceExpired  = false;
 
-            // Refresh tier/features — server may have changed the entitlement
+            // Refresh tier/features/update-entitlement — server may have changed any of them
             const int serverTier = json["tier"].toInt(m_tier);
             QStringList serverFeatures;
             for (const QJsonValue &v : json["features"].toArray())
                 serverFeatures << v.toString();
-            applyServerTier(serverTier, serverFeatures);
+            const QDate updatesUntil = QDate::fromString(json["updatesUntil"].toString(), Qt::ISODate);
+            applyServerTier(serverTier, serverFeatures, updatesUntil);
         } else {
             // Enforced at next launch by initialize()
             writeRevoked(true);
@@ -403,13 +420,15 @@ LicenseManager::ActivationResult LicenseManager::activateOnServer(
         m_state    = LicenseState::FullLicense;
         m_daysLeft = -1;
 
-        // Parse tier and optional per-feature list from server response.
-        // Server should return: { "valid": true, "tier": 3, "features": [...] }
+        // Parse tier, optional per-feature list, and optional update-entitlement
+        // date from the server response. Server should return:
+        // { "valid": true, "tier": 3, "features": [...], "updatesUntil": "2027-01-01" }
         const int serverTier = json["tier"].toInt(1);
         QStringList serverFeatures;
         for (const QJsonValue &v : json["features"].toArray())
             serverFeatures << v.toString();
-        applyServerTier(serverTier, serverFeatures);
+        const QDate updatesUntil = QDate::fromString(json["updatesUntil"].toString(), Qt::ISODate);
+        applyServerTier(serverTier, serverFeatures, updatesUntil);
 
         return ActivationResult::Success;
     }
@@ -488,9 +507,10 @@ void LicenseManager::initialize() {
 
         m_state    = LicenseState::FullLicense;
         m_daysLeft = -1;
-        // Restore the tier/features that were written at activation/heartbeat.
-        m_tier     = readStoredTier();
-        m_features = readStoredFeatures();
+        // Restore the tier/features/update-entitlement written at activation/heartbeat.
+        m_tier         = readStoredTier();
+        m_features     = readStoredFeatures();
+        m_updatesUntil = readStoredUpdatesUntil();
         if (m_features.isEmpty())
             m_features = featuresForTier(m_tier);
         return;
@@ -599,6 +619,7 @@ bool LicenseManager::verifyRecoveryCode(const QString &code) const {
 
 int         LicenseManager::tier()                             const { return m_tier; }
 QStringList LicenseManager::features()                         const { return m_features; }
+QDate       LicenseManager::updatesValidUntil()                const { return m_updatesUntil; }
 bool        LicenseManager::hasTier(int minTier)               const { return m_tier >= minTier; }
 bool        LicenseManager::hasFeature(const QString &feature) const {
     // Trial grants everything; activated copies use the server-supplied list.

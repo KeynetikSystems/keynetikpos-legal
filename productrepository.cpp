@@ -23,7 +23,10 @@ QVector<Product> ProductRepository::getAllProducts()
 {
     QVector<Product> products;
     QSqlQuery query(m_db);
-    query.prepare("SELECT id, name, category, price, cost_price, profit_margin, stock_quantity, reorder_level, barcode, is_active FROM products WHERE is_active = 1");
+    query.prepare("SELECT id, name, category, price, cost_price, profit_margin, stock_quantity, reorder_level, barcode, is_active "
+                  "FROM products "
+                  "WHERE is_active = 1 "
+                  "ORDER BY name ASC");
     query.exec();
     while (query.next()) {
         Product p;
@@ -174,6 +177,18 @@ QStringList ProductRepository::getAllCategories()
         categories.append(query.value(0).toString());
     }
     return categories;
+}
+
+bool ProductRepository::ensureCategory(const QString &name)
+{
+    QSqlQuery query(m_db);
+    query.prepare("INSERT OR IGNORE INTO categories (name) VALUES (?)");
+    query.addBindValue(name);
+    if (!query.exec()) {
+        m_lastError = query.lastError().text();
+        return false;
+    }
+    return true;
 }
 
 bool ProductRepository::updateStock(int productId, int newQuantity)

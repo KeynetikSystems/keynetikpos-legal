@@ -9,6 +9,9 @@
 //    of the table through QTextDocument/QPrinter.
 // =============================================================================
 #include "reportsdialog.h"
+#include "productrepository.h"
+#include "salerepository.h"
+#include "salesanalyticsrepository.h"
 #include "money.h"         // Money, formatMoney()
 #include "colorscheme.h"
 #include "licensemanager.h"
@@ -154,7 +157,7 @@ void ReportsDialog::generateSalesByDateReport()
     const QDate startDate = startDateEdit->date();
     const QDate endDate   = endDateEdit->date();
 
-    QVector<Sale> sales = m_db.getSalesByDateRange(startDate, endDate);
+    QVector<Sale> sales = m_db.sales().getSalesByDateRange(startDate, endDate);
 
     reportTable->setColumnCount(6);
     reportTable->setHorizontalHeaderLabels({"Sale ID", "Date", "Subtotal", "Tax", "Discount", "Total"});
@@ -198,14 +201,14 @@ void ReportsDialog::generateSalesByDateReport()
 
 void ReportsDialog::generateSalesByCategoryReport()
 {
-    QVector<Sale> sales = m_db.getAllSales();
+    QVector<Sale> sales = m_db.sales().getAllSales();
     QMap<QString, Money> categoryTotals;
     QMap<QString, int> categoryCount;
 
     for (const Sale &sale : sales) {
-        QVector<SaleItem> items = m_db.getSaleItems(sale.id);
+        QVector<SaleItem> items = m_db.sales().getSaleItems(sale.id);
         for (const SaleItem &item : items) {
-            Product product = m_db.getProductById(item.productId);
+            Product product = m_db.products().getProductById(item.productId);
             categoryTotals[product.category] += item.subtotal;
             categoryCount[product.category]++;
         }
@@ -245,7 +248,7 @@ void ReportsDialog::generateSalesByPaymentReport()
     // a "Cash + M-Pesa" label); falls back to the sale's method for pre-upgrade
     // sales — see Database::getPaymentTotalsByMethod().
     const QVector<PaymentTotal> totals =
-        m_db.getPaymentTotalsByMethod(startDate, endDate);
+        m_db.salesAnalytics().getPaymentTotalsByMethod(startDate, endDate);
 
     reportTable->setColumnCount(3);
     reportTable->setHorizontalHeaderLabels({"Payment Method", "Amount", "Tenders"});
@@ -274,7 +277,7 @@ void ReportsDialog::generateSalesByPaymentReport()
 
 void ReportsDialog::generateTopSellingProductsReport()
 {
-    QVector<QPair<QString, int>> topProducts = m_db.getTopSellingProducts(20);
+    QVector<QPair<QString, int>> topProducts = m_db.salesAnalytics().getTopSellingProducts(20);
 
     reportTable->setColumnCount(2);
     reportTable->setHorizontalHeaderLabels({"Product Name", "Total Quantity Sold"});
@@ -305,7 +308,7 @@ void ReportsDialog::generateDailySalesReport()
     const QDate startDate = startDateEdit->date();
     const QDate endDate   = endDateEdit->date();
 
-    QVector<Sale> sales = m_db.getSalesByDateRange(startDate, endDate);
+    QVector<Sale> sales = m_db.sales().getSalesByDateRange(startDate, endDate);
     QMap<QString, Money> dailyTotals;
     QMap<QString, int> dailyCount;
 
@@ -353,7 +356,7 @@ void ReportsDialog::generateProfitLossReport()
     const QDate start = startDateEdit->date();
     const QDate end   = endDateEdit->date();
 
-    const auto rows = m_db.getProfitLossByDateRange(start, end);
+    const auto rows = m_db.salesAnalytics().getProfitLossByDateRange(start, end);
 
     reportTable->setColumnCount(6);
     reportTable->setHorizontalHeaderLabels(
@@ -395,7 +398,7 @@ void ReportsDialog::generateStockValuationReport()
             "Contact sales@keynetik.com to upgrade.");
         return;
     }
-    const auto rows = m_db.getStockValuation();
+    const auto rows = m_db.products().getStockValuation();
 
     reportTable->setColumnCount(5);
     reportTable->setHorizontalHeaderLabels(

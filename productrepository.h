@@ -42,6 +42,13 @@ public:
     bool updateProduct(const Product &product);
     bool deleteProduct(int id);
     QStringList getAllCategories();
+    // Registers a category if it isn't already known — call before
+    // addProduct()/updateProduct() with a category that might be new.
+    // products.category is FK-enforced (see database.cpp), so an insert or
+    // update naming an unregistered category fails outright otherwise; this
+    // is what actually lets a clerk (till or phone) introduce a category on
+    // the fly rather than being limited to the install-time seed list.
+    bool ensureCategory(const QString &name);
 
     // Stock
     bool updateStock(int productId, int newQuantity);

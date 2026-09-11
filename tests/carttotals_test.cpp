@@ -10,6 +10,10 @@
 // WHY:  Money math is exactly the logic that must not regress silently.
 // =============================================================================
 #include <QtTest>
+#include <QFile>
+#include <QJsonArray>
+#include <QJsonDocument>
+#include <QJsonObject>
 
 #include "carttotals.h"
 #include "money.h"           // Money, formatMoney(), setCurrencySymbol()
@@ -145,6 +149,68 @@ private slots:
         // Empty/whitespace symbol falls back to the KSh default.
         setCurrencySymbol("   ");
         QCOMPARE(formatMoney(Money::fromCents(0)), QStringLiteral("KSh 0.00"));
+    }
+
+    // ── Cross-language drift guard ──────────────────────────────────────────
+    // The mobile app's standalone mode ported this exact math into Dart
+    // (cart_totals.dart) with no shared source of truth. This fixture is that
+    // shared source: mobile/keynetik_scanner/test/fixtures/cart_totals_cases.json
+    // is a copy of tests/fixtures/cart_totals_cases.json, and both test suites
+    // iterate it — so a new/changed case only has to be added twice (copy the
+    // file), never hand-translated into a second assertion that can silently
+    // diverge from this one.
+    void fixtureCases_data()
+    {
+        QTest::addColumn<qint64>("subtotalCents");
+        QTest::addColumn<qint64>("discountCents");
+        QTest::addColumn<bool>("taxEnabled");
+        QTest::addColumn<double>("taxRate");
+        QTest::addColumn<bool>("taxInclusive");
+        QTest::addColumn<qint64>("expectDiscountCents");
+        QTest::addColumn<qint64>("expectTaxCents");
+        QTest::addColumn<qint64>("expectTotalCents");
+
+        const QString path = QFINDTESTDATA("fixtures/cart_totals_cases.json");
+        QFile file(path);
+        QVERIFY2(file.open(QIODevice::ReadOnly),
+                 qPrintable("Couldn't open " + path));
+        const QJsonArray cases = QJsonDocument::fromJson(file.readAll()).array();
+        QVERIFY2(!cases.isEmpty(), "Fixture parsed but contained no cases");
+
+        for (const QJsonValue &v : cases) {
+            const QJsonObject row = v.toObject();
+            QTest::newRow(row["name"].toString().toUtf8().constData())
+                << (qint64)row["subtotalCents"].toDouble()
+                << (qint64)row["discountCents"].toDouble()
+                << row["taxEnabled"].toBool()
+                << row["taxRate"].toDouble()
+                << row["taxInclusive"].toBool()
+                << (qint64)row["expectDiscountCents"].toDouble()
+                << (qint64)row["expectTaxCents"].toDouble()
+                << (qint64)row["expectTotalCents"].toDouble();
+        }
+    }
+
+    void fixtureCases()
+    {
+        QFETCH(qint64, subtotalCents);
+        QFETCH(qint64, discountCents);
+        QFETCH(bool, taxEnabled);
+        QFETCH(double, taxRate);
+        QFETCH(bool, taxInclusive);
+        QFETCH(qint64, expectDiscountCents);
+        QFETCH(qint64, expectTaxCents);
+        QFETCH(qint64, expectTotalCents);
+
+        BusinessSettings bs;
+        bs.taxEnabled   = taxEnabled;
+        bs.taxRate      = taxRate;
+        bs.taxInclusive = taxInclusive;
+
+        const CartTotals t = computeCartTotals(c(subtotalCents), c(discountCents), bs);
+        QCOMPARE(t.discount.cents(), expectDiscountCents);
+        QCOMPARE(t.tax.cents(),      expectTaxCents);
+        QCOMPARE(t.total.cents(),    expectTotalCents);
     }
 };
 

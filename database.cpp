@@ -7,12 +7,11 @@
 //    pos_database.db there; initialize() enables PRAGMA foreign_keys (off by
 //    default per SQLite connection), creates tables idempotently, and seeds
 //    sample products only when the products table is empty.
-//  - recordSale() is the heart of checkout: stock re-validation, sale insert,
-//    per-item inserts (snapshotting name/price/cost), and stock decrements all
-//    happen inside ONE transaction; any failure rolls back and returns -1 with
-//    lastError set.
-//  - adjustStockWithLog() wraps a manual stock change and its audit-log row in
-//    one transaction so the log can never disagree with the stock.
+//  - This file is now connection lifecycle + schema bootstrap/migrations +
+//    backup/integrity ONLY. All domain reads/writes (products, sales, refunds,
+//    suppliers, POs, expenses, customers, analytics) live in the *Repository
+//    classes; the products()/sales()/... accessors hand out Database-owned
+//    instances. recordSale() etc. moved to SaleRepository.
 //  - ensureColumn() adds missing columns to old databases (in-place upgrade).
 // =============================================================================
 #include "database.h"
@@ -68,6 +67,12 @@ Database::~Database()
 void Database::configureForTesting(const QString &dbPath)
 {
     const QString conn = QStringLiteral("keynetik_test");
+    // Drop the cached repositories first: each holds a COPY of the current
+    // connection handle, and they'd dangle (and crash on next use) once we
+    // remove that connection below. They're lazily rebuilt against the new
+    // connection on next access. Releasing them here also clears the only other
+    // references, so removeDatabase() won't warn that the connection is in use.
+    resetRepositories();
     if (db.isOpen())
         db.close();
     db = QSqlDatabase();   // drop our handle so removeDatabase() won't warn
@@ -140,11 +145,73 @@ bool Database::isOpen() const
 {
     return db.isOpen();
 }
-bool Database::adjustStockWithLog(int productId, int qtyChange,
-                                  const QString &reason, const QString &adjustedBy)
+
+// ── Repository accessors ─────────────────────────────────────────────────────
+// Each returns a reference to a single, Database-owned repository, created on
+// first use so it captures whatever connection is live by then (including the
+// test connection installed by configureForTesting()). Holding one instance per
+// group — rather than constructing a throwaway per call — is what makes the
+// "mutate, then read lastError() off the same accessor" pattern work.
+ProductRepository &Database::products()
 {
-    return ProductRepository(db).adjustStockWithLog(productId, qtyChange, reason, adjustedBy);
+    if (!m_products) m_products = std::make_unique<ProductRepository>(db);
+    return *m_products;
 }
+
+SaleRepository &Database::sales()
+{
+    if (!m_sales) m_sales = std::make_unique<SaleRepository>(db);
+    return *m_sales;
+}
+
+SalesAnalyticsRepository &Database::salesAnalytics()
+{
+    if (!m_salesAnalytics) m_salesAnalytics = std::make_unique<SalesAnalyticsRepository>(db);
+    return *m_salesAnalytics;
+}
+
+RefundRepository &Database::refunds()
+{
+    if (!m_refunds) m_refunds = std::make_unique<RefundRepository>(db);
+    return *m_refunds;
+}
+
+SupplierRepository &Database::suppliers()
+{
+    if (!m_suppliers) m_suppliers = std::make_unique<SupplierRepository>(db);
+    return *m_suppliers;
+}
+
+PurchaseOrderRepository &Database::purchaseOrders()
+{
+    if (!m_purchaseOrders) m_purchaseOrders = std::make_unique<PurchaseOrderRepository>(db);
+    return *m_purchaseOrders;
+}
+
+ExpenseRepository &Database::expenses()
+{
+    if (!m_expenses) m_expenses = std::make_unique<ExpenseRepository>(db);
+    return *m_expenses;
+}
+
+CustomerRepository &Database::customers()
+{
+    if (!m_customers) m_customers = std::make_unique<CustomerRepository>(db);
+    return *m_customers;
+}
+
+void Database::resetRepositories()
+{
+    m_products.reset();
+    m_sales.reset();
+    m_salesAnalytics.reset();
+    m_refunds.reset();
+    m_suppliers.reset();
+    m_purchaseOrders.reset();
+    m_expenses.reset();
+    m_customers.reset();
+}
+
 bool Database::createTables()
 {
     QStringList queries;
@@ -182,6 +249,13 @@ bool Database::createTables()
         )
     )";
     // Sales table
+    //
+    // TIMEZONE INVARIANT: sale_date defaults to CURRENT_TIMESTAMP, which SQLite
+    // writes in UTC. Every query that filters or groups by it MUST convert
+    // first — DATE(sale_date, 'localtime') — because callers pass local dates
+    // from QDate::currentDate(). Comparing a UTC column against a local date
+    // silently drops sales made between local midnight and the UTC rollover
+    // (03:00 in Kenya), which is exactly when late-night shops trade.
     queries << R"(
         CREATE TABLE IF NOT EXISTS sales (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -469,6 +543,44 @@ bool Database::runMigrations()
               return ensureColumn("sales", "cashier",  "TEXT DEFAULT ''")
                   && ensureColumn("sales", "shift_id", "INTEGER DEFAULT 0");
           } },
+        { 5, "sales: external_ref (mobile offline-sync idempotency key)",
+          [this] {
+              // SQLite's ALTER TABLE ADD COLUMN can't carry a UNIQUE
+              // constraint, so the column and its uniqueness are two steps.
+              // Multiple NULLs (every sale rung up normally at the till, never
+              // synced from a phone) are fine — SQLite treats NULLs as
+              // distinct in a UNIQUE index, so they never collide.
+              if (!ensureColumn("sales", "external_ref", "TEXT"))
+                  return false;
+              QSqlQuery idx(db);
+              return idx.exec(
+                  "CREATE UNIQUE INDEX IF NOT EXISTS idx_sales_external_ref "
+                  "ON sales(external_ref)");
+          } },
+        { 6, "categories: broaden the seed list past the original 8 small-shop "
+             "categories for larger-format stores",
+          [this] {
+              static const QStringList newCategories = {
+                  "Fish & Seafood", "Cereals & Grains", "Cooking Oil & Fats",
+                  "Rice, Pasta & Noodles", "Sugar & Baking Supplies", "Spices & Condiments",
+                  "Canned & Packaged Foods", "Health & Beauty", "Personal Care",
+                  "Baby Care", "Feminine Care", "Cleaning Supplies",
+                  "Kitchenware & Utensils", "Electronics", "Stationery & Office",
+                  "Clothing & Apparel", "Footwear", "Toys & Games",
+                  "Sports & Outdoor", "Automotive", "Hardware & Tools",
+                  "Pet Supplies", "Alcohol & Spirits", "Tobacco",
+                  "Pharmacy", "Mobile & Airtime", "Gifts & Party Supplies",
+                  "Books & Magazines",
+              };
+              QSqlQuery q(db);
+              q.prepare("INSERT OR IGNORE INTO categories (name) VALUES (?)");
+              for (const QString &name : newCategories) {
+                  q.addBindValue(name);
+                  if (!q.exec())
+                      return false;
+              }
+              return true;
+          } },
     };
 
     const int current = schemaVersion();
@@ -586,41 +698,49 @@ bool Database::insertSampleData()
     // Insert sample products (fixed inconsistent cost values for realism; all now in whole numbers as per most of your original data)
     // Structure: {name, category, cost_price, profit_margin, stock, barcode}
     QVector<QVariantList> products = {
-        {"Coca-Cola 500ml", "Beverages", 50.0, 50.0, 100, "CC500"},   // 50 -> 75
-        {"Pepsi 500ml", "Beverages", 50.0, 50.0, 100, "PP500"},       // 50 -> 75
-        {"Water 1L", "Beverages", 50.0, 50.0, 150, "W1L"},            // 50 -> 75
-        {"Orange Juice 1L", "Beverages", 250.0, 40.0, 50, "OJ1L"},     // 250 -> 350
-        {"Coffee", "Beverages", 180.0, 38.9, 80, "COFFEE"},           // 180 -> 250
-        {"Chips - BBQ", "Snacks", 140.0, 42.9, 75, "CHIP001"},        // 140 -> 200
-        {"Chips - Salt & Vinegar", "Snacks", 140.0, 42.9, 75, "CHIP002"},
-        {"Chocolate Bar", "Snacks", 85.0, 47.1, 120, "CHOC001"},      // 85 -> 125
-        {"Cookies", "Snacks", 210.0, 42.9, 60, "COOK001"},            // 210 -> 300
-        {"Nuts Mix", "Snacks", 320.0, 40.6, 40, "NUTS001"},           // 320 -> 450
-        {"White Bread", "Bakery", 180.0, 38.9, 50, "BREAD001"},       // 180 -> 250
-        {"Wheat Bread", "Bakery", 195.0, 41.0, 50, "BREAD002"},       // 195 -> 275
-        {"Croissant", "Bakery", 105.0, 42.9, 30, "CROIS001"},         // 105 -> 150
-        {"Donut", "Bakery", 70.0, 42.9, 40, "DONUT001"},              // 70 -> 100
-        {"Muffin", "Bakery", 140.0, 42.9, 35, "MUFF001"},             // 140 -> 200
-        {"Milk 1L", "Dairy", 180.0, 38.9, 60, "MILK1L"},              // 180 -> 250
-        {"Cheese 500g", "Dairy", 400.0, 37.5, 40, "CHEESE500"},       // 400 -> 550
-        {"Yogurt", "Dairy", 105.0, 42.9, 80, "YOG001"},               // 105 -> 150
-        {"Butter 250g", "Dairy", 250.0, 40.0, 50, "BUTT250"},         // 250 -> 350
-        {"Eggs (12)", "Dairy", 215.0, 39.5, 70, "EGG12"},             // 215 -> 300
-        {"Chicken Breast 1kg", "Meat", 620.0, 37.1, 30, "CHICK1K"},   // 620 -> 850
-        {"Ground Beef 500g", "Meat", 430.0, 39.5, 25, "BEEF500"},     // 430 -> 600
-        {"Salmon Fillet", "Meat", 880.0, 36.4, 20, "SAL001"},         // 880 -> 1200
-        {"Bacon 250g", "Meat", 395.0, 39.2, 35, "BAC250"},            // 395 -> 550
-        {"Apples 1kg", "Produce", 250.0, 40.0, 100, "APP1K"},         // 250 -> 350
-        {"Bananas 1kg", "Produce", 180.0, 38.9, 120, "BAN1K"},        // 180 -> 250
-        {"Tomatoes 500g", "Produce", 140.0, 42.9, 80, "TOM500"},      // 140 -> 200
-        {"Lettuce", "Produce", 105.0, 42.9, 60, "LET001"},            // 105 -> 150
-        {"Carrots 1kg", "Produce", 125.0, 40.0, 90, "CAR1K"},         // 125 -> 175
-        {"Ice Cream 1L", "Frozen", 320.0, 40.6, 40, "ICE1L"},         // 320 -> 450
-        {"Frozen Pizza", "Frozen", 430.0, 39.5, 50, "PIZ001"},        // 430 -> 600
-        {"Frozen Vegetables", "Frozen", 215.0, 39.5, 60, "FVEG001"},  // 215 -> 300
-        {"Dish Soap", "Household", 250.0, 40.0, 50, "SOAP001"},       // 250 -> 350
-        {"Paper Towels", "Household", 285.0, 40.4, 40, "TOWEL001"},   // 285 -> 400
-        {"Toilet Paper (4)", "Household", 360.0, 38.9, 60, "TP004"}   // 360 -> 500
+        {"Coca-Cola 500ml", "Beverages", 50.0, 33.0, 100, "CC500"},
+        {"Pepsi 500ml", "Beverages", 50.0, 33.0, 100, "PP500"},
+        {"Water 1L", "Beverages", 50.0, 33.0, 150, "W1L"},
+        {"Orange Juice 1L", "Beverages", 245.0, 30.0, 50, "OJ1L"},
+        {"Coffee", "Beverages", 180.0, 28.0, 80, "COFFEE"},
+        {"Old Spice","PE",120.0,85.0,45,"50001740033451"},
+
+        {"Chips - BBQ", "Snacks", 140.0, 30.0, 75, "CHIP001"},
+        {"Chips - Salt & Vinegar", "Snacks", 140.0, 30.0, 75, "CHIP002"},
+        {"Chocolate Bar", "Snacks", 85.0, 32.0, 120, "CHOC001"},
+        {"Cookies", "Snacks", 215.0, 28.0, 60, "COOK001"},
+        {"Nuts Mix", "Snacks", 325.0, 28.0, 40, "NUTS001"},
+
+        {"White Bread", "Bakery", 180.0, 28.0, 50, "BREAD001"},
+        {"Wheat Bread", "Bakery", 195.0, 29.0, 50, "BREAD002"},
+        {"Croissant", "Bakery", 105.0, 30.0, 30, "CROIS001"},
+        {"Donut", "Bakery", 70.0, 30.0, 40, "DONUT001"},
+        {"Muffin", "Bakery", 140.0, 30.0, 35, "MUFF001"},
+
+        {"Milk 1L", "Dairy", 180.0, 28.0, 60, "MILK1L"},
+        {"Cheese 500g", "Dairy", 400.0, 27.0, 40, "CHEESE500"},
+        {"Yogurt", "Dairy", 105.0, 30.0, 80, "YOG001"},
+        {"Butter 250g", "Dairy", 250.0, 28.0, 50, "BUTT250"},
+        {"Eggs (12)", "Dairy", 215.0, 28.0, 70, "EGG12"},
+
+        {"Chicken Breast 1kg", "Meat", 620.0, 27.0, 30, "CHICK1K"},
+        {"Ground Beef 500g", "Meat", 430.0, 28.0, 25, "BEEF500"},
+        {"Salmon Fillet", "Meat", 880.0, 27.0, 20, "SAL001"},
+        {"Bacon 250g", "Meat", 395.0, 28.0, 35, "BAC250"},
+
+        {"Apples 1kg", "Produce", 250.0, 28.0, 100, "APP1K"},
+        {"Bananas 1kg", "Produce", 180.0, 28.0, 120, "BAN1K"},
+        {"Tomatoes 500g", "Produce", 140.0, 30.0, 80, "TOM500"},
+        {"Lettuce", "Produce", 105.0, 30.0, 60, "LET001"},
+        {"Carrots 1kg", "Produce", 125.0, 29.0, 90, "CAR1K"},
+
+        {"Ice Cream 1L", "Frozen", 320.0, 28.0, 40, "ICE1L"},
+        {"Frozen Pizza", "Frozen", 430.0, 28.0, 50, "PIZ001"},
+        {"Frozen Vegetables", "Frozen", 215.0, 28.0, 60, "FVEG001"},
+
+        {"Dish Soap", "Household", 250.0, 28.0, 50, "SOAP001"},
+        {"Paper Towels", "Household", 285.0, 29.0, 40, "TOWEL001"},
+        {"Toilet Paper (4)", "Household", 360.0, 28.0, 60, "TP004"}
     };
 
     for (const QVariantList &product : products) {
@@ -675,378 +795,11 @@ bool Database::insertSampleData()
     return true;
 }
 
-// ==================== Product operations ====================
-
-QVector<Product> Database::getAllProducts()
-{
-    return ProductRepository(db).getAllProducts();
-}
-
-QVector<Product> Database::getProductsByCategory(const QString &category)
-{
-    return ProductRepository(db).getProductsByCategory(category);
-}
-
-Product Database::getProductById(int id)
-{
-    return ProductRepository(db).getProductById(id);
-}
-
-Product Database::getProductByBarcode(const QString &barcode)
-{
-    return ProductRepository(db).getProductByBarcode(barcode);
-}
-
-bool Database::addProduct(const Product &product)
-{
-    ProductRepository repo(db);
-    const bool ok = repo.addProduct(product);
-    lastError = repo.lastError();
-    return ok;
-}
-
-bool Database::updateProduct(const Product &product)
-{
-    ProductRepository repo(db);
-    const bool ok = repo.updateProduct(product);
-    lastError = repo.lastError();
-    return ok;
-}
-
-bool Database::deleteProduct(int id)
-{
-    ProductRepository repo(db);
-    const bool ok = repo.deleteProduct(id);
-    lastError = repo.lastError();
-    return ok;
-}
-
-QStringList Database::getAllCategories()
-{
-    return ProductRepository(db).getAllCategories();
-}
-
-// ==================== Inventory operations ====================
-
-bool Database::updateStock(int productId, int newQuantity)
-{
-    return ProductRepository(db).updateStock(productId, newQuantity);
-}
-
-bool Database::setReorderLevel(int productId, int level)
-{
-    ProductRepository repo(db);
-    const bool ok = repo.setReorderLevel(productId, level);
-    lastError = repo.lastError();
-    return ok;
-}
-
-bool Database::decreaseStock(int productId, int quantity)
-{
-    return ProductRepository(db).decreaseStock(productId, quantity);
-}
-
-bool Database::increaseStock(int productId, int quantity)
-{
-    return ProductRepository(db).increaseStock(productId, quantity);
-}
-
-int Database::getStock(int productId)
-{
-    return ProductRepository(db).getStock(productId);
-}
-
-// ==================== Sales operations ====================
-
-int Database::recordSale(const SaleRequest &request)
-{
-    SaleRepository repo(db);
-    const int id = repo.recordSale(request);
-    lastError = repo.lastError();
-    return id;
-}
-
-QVector<PaymentTotal> Database::getPaymentTotalsByMethod(const QDate &startDateArg,
-                                                         const QDate &endDateArg)
-{
-    return SalesAnalyticsRepository(db).getPaymentTotalsByMethod(startDateArg, endDateArg);
-}
-
-QVector<Sale> Database::getAllSales()
-{
-    return SaleRepository(db).getAllSales();
-}
-
-QVector<Sale> Database::getSalesByDateRange(const QDate &startDate, const QDate &endDate)
-{
-    return SaleRepository(db).getSalesByDateRange(startDate, endDate);
-}
-
-QVector<SaleItem> Database::getSaleItems(int saleId)
-{
-    return SaleRepository(db).getSaleItems(saleId);
-}
-
-Sale Database::getSaleById(int saleId)
-{
-    return SaleRepository(db).getSaleById(saleId);
-}
-
-// ==================== Analytics ====================
-
-Money Database::getTotalSalesToday()
-{
-    return SalesAnalyticsRepository(db).getTotalSalesToday();
-}
-
-Money Database::getTotalSalesThisMonth()
-{
-    return SalesAnalyticsRepository(db).getTotalSalesThisMonth();
-}
-
-int Database::getTotalTransactionsToday()
-{
-    return SalesAnalyticsRepository(db).getTotalTransactionsToday();
-}
-
-QVector<QPair<QString, int>> Database::getTopSellingProducts(int limit)
-{
-    return SalesAnalyticsRepository(db).getTopSellingProducts(limit);
-}
-
-bool Database::logStockAdjustment(int productId, const QString &productName,
-                                  int oldQty, int newQty,
-                                  const QString &reason, const QString &adjustedBy)
-{
-    return ProductRepository(db).logStockAdjustment(productId, productName, oldQty, newQty, reason, adjustedBy);
-}
-
-QVector<Database::StockAdjustment> Database::getStockHistory(int productId, int limit) const
-{
-    return ProductRepository(db).getStockHistory(productId, limit);
-}
-
-bool Database::processRefund(int saleId, const QString &reason, const QString &processedBy)
-{
-    RefundRepository repo(db);
-    const bool ok = repo.processRefund(saleId, reason, processedBy);
-    lastError = repo.lastError();
-    return ok;
-}
-
-bool Database::isRefunded(int saleId) const
-{
-    return RefundRepository(db).isRefunded(saleId);
-}
-
-// ==================== Suppliers ====================
-
-QVector<Supplier> Database::getAllSuppliers(bool includeInactive)
-{
-    return SupplierRepository(db).getAllSuppliers(includeInactive);
-}
-
-Supplier Database::getSupplierById(int id)
-{
-    return SupplierRepository(db).getSupplierById(id);
-}
-
-bool Database::addSupplier(const Supplier &supplier)
-{
-    SupplierRepository repo(db);
-    const bool ok = repo.addSupplier(supplier);
-    lastError = repo.lastError();
-    return ok;
-}
-
-bool Database::updateSupplier(const Supplier &supplier)
-{
-    SupplierRepository repo(db);
-    const bool ok = repo.updateSupplier(supplier);
-    lastError = repo.lastError();
-    return ok;
-}
-
-bool Database::deactivateSupplier(int id)
-{
-    SupplierRepository repo(db);
-    const bool ok = repo.deactivateSupplier(id);
-    lastError = repo.lastError();
-    return ok;
-}
-
-// ==================== Purchase Orders ====================
-
-int Database::createPurchaseOrder(int supplierId, const QVector<PurchaseOrderItem> &items,
-                                  const QString &notes, const QString &createdBy)
-{
-    PurchaseOrderRepository repo(db);
-    const int ok = repo.createPurchaseOrder(supplierId, items, notes, createdBy);
-    lastError = repo.lastError();
-    return ok;
-}
-
-QVector<PurchaseOrder> Database::getAllPurchaseOrders()
-{
-    return PurchaseOrderRepository(db).getAllPurchaseOrders();
-}
-
-QVector<PurchaseOrder> Database::getPurchaseOrdersBySupplier(int supplierId)
-{
-    return PurchaseOrderRepository(db).getPurchaseOrdersBySupplier(supplierId);
-}
-
-PurchaseOrder Database::getPurchaseOrderById(int id)
-{
-    return PurchaseOrderRepository(db).getPurchaseOrderById(id);
-}
-
-QVector<PurchaseOrderItem> Database::getPurchaseOrderItems(int poId)
-{
-    return PurchaseOrderRepository(db).getPurchaseOrderItems(poId);
-}
-
-bool Database::receivePurchaseOrder(int poId, const QString &receivedBy)
-{
-    PurchaseOrderRepository repo(db);
-    const bool ok = repo.receivePurchaseOrder(poId, receivedBy);
-    lastError = repo.lastError();
-    return ok;
-}
-
-bool Database::cancelPurchaseOrder(int poId)
-{
-    PurchaseOrderRepository repo(db);
-    const bool ok = repo.cancelPurchaseOrder(poId);
-    lastError = repo.lastError();
-    return ok;
-}
-
-// ==================== Expense Categories ====================
-
-QVector<ExpenseCategory> Database::getAllExpenseCategories(bool includeInactive)
-{
-    return ExpenseRepository(db).getAllExpenseCategories(includeInactive);
-}
-
-bool Database::addExpenseCategory(const QString &name)
-{
-    ExpenseRepository repo(db);
-    const bool ok = repo.addExpenseCategory(name);
-    lastError = repo.lastError();
-    return ok;
-}
-
-bool Database::deactivateExpenseCategory(int id)
-{
-    ExpenseRepository repo(db);
-    const bool ok = repo.deactivateExpenseCategory(id);
-    lastError = repo.lastError();
-    return ok;
-}
-
-// ==================== Expenses ====================
-
-bool Database::addExpense(const Expense &expense)
-{
-    ExpenseRepository repo(db);
-    const bool ok = repo.addExpense(expense);
-    lastError = repo.lastError();
-    return ok;
-}
-
-QVector<Expense> Database::getAllExpenses()
-{
-    return ExpenseRepository(db).getAllExpenses();
-}
-
-QVector<Expense> Database::getExpensesByDateRange(const QDate &start, const QDate &end)
-{
-    return ExpenseRepository(db).getExpensesByDateRange(start, end);
-}
-
-Money Database::getTotalExpenses(const QDate &start, const QDate &end)
-{
-    return ExpenseRepository(db).getTotalExpenses(start, end);
-}
-
-// ==================== Customers ====================
-
-QVector<Customer> Database::getAllCustomers(bool includeInactive)
-{
-    return CustomerRepository(db).getAllCustomers(includeInactive);
-}
-
-Customer Database::getCustomerById(int id)
-{
-    return CustomerRepository(db).getCustomerById(id);
-}
-
-Customer Database::getCustomerByPhone(const QString &phone)
-{
-    return CustomerRepository(db).getCustomerByPhone(phone);
-}
-
-bool Database::addCustomer(const Customer &customer)
-{
-    CustomerRepository repo(db);
-    const bool ok = repo.addCustomer(customer);
-    lastError = repo.lastError();
-    return ok;
-}
-
-bool Database::updateCustomer(const Customer &customer)
-{
-    CustomerRepository repo(db);
-    const bool ok = repo.updateCustomer(customer);
-    lastError = repo.lastError();
-    return ok;
-}
-
-bool Database::deactivateCustomer(int id)
-{
-    CustomerRepository repo(db);
-    const bool ok = repo.deactivateCustomer(id);
-    lastError = repo.lastError();
-    return ok;
-}
-
-bool Database::adjustStoreCredit(int customerId, Money delta, const QString &reason)
-{
-    CustomerRepository repo(db);
-    const bool ok = repo.adjustStoreCredit(customerId, delta, reason);
-    lastError = repo.lastError();
-    return ok;
-}
-
-QVector<Sale> Database::getCustomerPurchaseHistory(int customerId)
-{
-    return SaleRepository(db).getCustomerPurchaseHistory(customerId);
-}
-
-// =============================================================================
-// P&L, Stock Valuation, Loyalty Redemption
-// =============================================================================
-
-QVector<Database::ProfitLossRow> Database::getProfitLossByDateRange(
-    const QDate &startArg, const QDate &endArg)
-{
-    return SalesAnalyticsRepository(db).getProfitLossByDateRange(startArg, endArg);
-}
-
-QVector<Database::StockValuationRow> Database::getStockValuation()
-{
-    return ProductRepository(db).getStockValuation();
-}
-
-bool Database::redeemLoyaltyPoints(int customerId, int pointsToRedeem,
-                                   Money creditValue)
-{
-    CustomerRepository repo(db);
-    const bool ok = repo.redeemLoyaltyPoints(customerId, pointsToRedeem, creditValue);
-    lastError = repo.lastError();
-    return ok;
-}
+// ── Domain data access ───────────────────────────────────────────────────────
+// All product/sale/analytics/refund/supplier/PO/expense/customer reads and
+// writes live in their repositories now (see the accessors above and the
+// *repository.cpp files). Database only owns connection lifecycle, schema
+// bootstrap/migrations, and backup/integrity below.
 
 // ==================== Backup ====================
 
@@ -1190,21 +943,4 @@ bool Database::verifyBackup(const QString &backupPath, QString *errorOut)
     }
     QSqlDatabase::removeDatabase(connName);
     return true;
-}
-
-// ==================== Profit calculation methods ====================
-
-Money Database::getActualGrossProfit(const QDate &startDate, const QDate &endDate)
-{
-    return SalesAnalyticsRepository(db).getActualGrossProfit(startDate, endDate);
-}
-
-Money Database::getActualGrossProfitToday()
-{
-    return SalesAnalyticsRepository(db).getActualGrossProfitToday();
-}
-
-Money Database::getActualGrossProfitThisMonth()
-{
-    return SalesAnalyticsRepository(db).getActualGrossProfitThisMonth();
 }

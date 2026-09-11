@@ -65,6 +65,8 @@ class ProductFilterProxy;
 class InventoryDialog;
 class SalesHistoryDialog;
 class QStackedWidget;
+class PosApiServer;
+class MobileScannerDialog;
 
 // -----------------------------------------------------------------------------
 // MainWindow
@@ -97,6 +99,7 @@ private:
     // ── Services ────────────────────────────────────────────────────────────
     CartService      *cartService       { nullptr };
     CheckoutService  *checkoutService   { nullptr };
+    PosApiServer     *apiServer         { nullptr };  // LAN mobile-scanner API
 
 
     // ── UI — products panel (model/view, see productgridmodel.h) ───────────
@@ -170,6 +173,10 @@ private:
 
     // ── Data helpers ────────────────────────────────────────────────────────
     void loadProducts();
+    // Diff-based product-grid refresh (see ProductGridModel::syncProducts) —
+    // polled every POSConfig::PRODUCT_GRID_SYNC_MS, unlike loadProducts()'s
+    // full reload, so it never disturbs an in-progress search/scroll/selection.
+    void syncProductGrid();
     void updateTotals();
     void refreshTaxTitle();
     void updateCartSelector();
@@ -191,8 +198,9 @@ private:
 
     // Modeless reference dialogs — single instance each, so the cashier can
     // keep inventory / sales history open while ringing up a sale.
-    QPointer<InventoryDialog>    m_inventoryDlg;
-    QPointer<SalesHistoryDialog> m_salesHistoryDlg;
+    QPointer<InventoryDialog>      m_inventoryDlg;
+    QPointer<SalesHistoryDialog>   m_salesHistoryDlg;
+    QPointer<MobileScannerDialog>  m_mobileScannerDlg;
 
     // Active customer for the current checkout (cleared after each sale)
     Customer    m_selectedCustomer;
@@ -257,6 +265,7 @@ private slots:
     void onReceiptSettings();
     void onManageSchedules();
     void onBackupNow();
+    void onShowMobileScanner();
 
     // ── User ────────────────────────────────────────────────────────────────
     void onUserManagement();

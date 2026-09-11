@@ -46,6 +46,13 @@ public:
     Sale getSaleById(int saleId);
     QVector<Sale> getCustomerPurchaseHistory(int customerId);
 
+    // Mobile offline-sync idempotency (see PosApiServer::/sales/sync): a sale
+    // synced from a phone's local queue is stamped with the phone's
+    // client-generated key, so a retried flush can recognize "already
+    // recorded" instead of inserting a second sale. Returns -1 if not found.
+    int  getSaleIdByExternalRef(const QString &externalRef) const;
+    bool setExternalRef(int saleId, const QString &externalRef);
+
     QString lastError() const { return m_lastError; }
 
 private:

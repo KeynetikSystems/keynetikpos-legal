@@ -22,6 +22,9 @@
 
 #include "mainwindow.h"
 #include "database.h"
+#include "customerrepository.h"
+#include "productrepository.h"
+#include "salesanalyticsrepository.h"
 #include "paymentdialog.h"
 #include "discountdialog.h"
 #include "analyticsdashboard.h"
@@ -61,6 +64,9 @@
 #include "productgridmodel.h"
 #include "changepassworddialog.h"
 #include "licensemanager.h"
+#include "barcodescan.h"
+#include "posapiserver.h"
+#include "mobilescannerdialog.h"
 
 #include <QVBoxLayout>
 #include <QHBoxLayout>
@@ -101,6 +107,13 @@ constexpr int TOAST_DISPLAY_MS      = 2800;
 constexpr int TOAST_FADE_MS         = 200;
 
 constexpr int DATETIME_UPDATE_MS    = 1000;
+
+constexpr quint16 MOBILE_SCANNER_API_PORT = 8420;  // LAN-local scanner API
+
+// How often the product grid re-checks the DB for products added/removed by
+// something other than this window (the mobile scanner's New Item mode, a
+// direct DB edit) — see MainWindow::syncProductGrid().
+constexpr int PRODUCT_GRID_SYNC_MS = 10000;
 }
 
 // -----------------------------------------------------------------------------
@@ -217,7 +230,24 @@ MainWindow::MainWindow(Database &db, QWidget *parent)
 
     // ── Services (CartService creates the first cart itself) ───────────────
     cartService     = new CartService(this);
-    checkoutService = new CheckoutService(m_db, inventoryManager, receiptPrinter);
+    // Capture the signed-in operator for the checkout pipeline's audit/receipt
+    // fields, so CheckoutService stays free of the UserManager singleton. This
+    // window is rebuilt on every login, so the identity is always current.
+    OperatorContext op;
+    op.username = UserManager::instance().getCurrentUsername();
+    op.fullName = UserManager::instance().getCurrentUser().fullName;
+    op.log      = [](const QString &action, const QString &details) {
+        UserManager::instance().logUserAction(action, details);
+    };
+    checkoutService = new CheckoutService(m_db, inventoryManager, receiptPrinter,
+                                          std::move(op));
+
+    // LAN mobile-scanner API — needs cartService + inventoryManager + settings
+    // manager, all of which exist by this point. Not listening yet: listen()
+    // is called from runDeferredStartup() so opening the socket never delays
+    // first paint.
+    apiServer = new PosApiServer(m_db, *inventoryManager, *cartService,
+                                 *settingsManager, this);
 
     // ── Theme ───────────────────────────────────────────────────────────────
     // Any theme change (from this window's menu or elsewhere) restyles the
@@ -225,7 +255,7 @@ MainWindow::MainWindow(Database &db, QWidget *parent)
     connect(&ThemeManager::instance(), &ThemeManager::themeChanged,
             this, [this](bool) { applyTheme(); });
 
-    setWindowTitle("KeynetikPOS - Point of Sale System");
+    setWindowTitle("KeynetikPOS");
     resize(1400, 900);
     // Floor below which the two-panel layout starts clipping; keeps the app
     // usable on small/secondary cashier displays.
@@ -321,10 +351,28 @@ void MainWindow::runDeferredStartup()
     // Barcode scanner — in serial mode the port open() can block briefly.
     // statusLabel already exists (setupUI ran in the ctor).
     initBarcodeReader();
+
+    // Mobile-scanner API — opening the listen socket is deferred for the same
+    // reason as the barcode reader above. Best-effort: a failed bind (e.g. the
+    // port is already in use) just means the feature is unavailable this run,
+    // never a startup failure.
+    if (!apiServer->listen(POSConfig::MOBILE_SCANNER_API_PORT)) {
+        qWarning() << "[PosApiServer] Failed to listen on port"
+                   << POSConfig::MOBILE_SCANNER_API_PORT;
+    }
+
+    // Product grid: pick up products added/removed from outside this window
+    // (the mobile scanner's New Item mode, a direct DB edit) without waiting
+    // for something in-app to trigger loadProducts(). Parented to `this`, so
+    // no manual cleanup — Qt stops and deletes it with the window.
+    auto *productSyncTimer = new QTimer(this);
+    connect(productSyncTimer, &QTimer::timeout, this, &MainWindow::syncProductGrid);
+    productSyncTimer->start(POSConfig::PRODUCT_GRID_SYNC_MS);
 }
 
 MainWindow::~MainWindow()
 {
+    delete apiServer;
     delete checkoutService;
     delete inventoryManager;
     delete receiptPrinter;
@@ -391,40 +439,35 @@ void MainWindow::onBarcodeScanned(const QString &barcode)
     if (barcode.trimmed().isEmpty())
         return;
 
-    const QString code = barcode.trimmed();
+    // addBarcodeToCart() is the single home for lookup + stock validation +
+    // cart insertion, shared with the LAN mobile-scanner API (PosApiServer) —
+    // see barcodescan.h for why that sharing matters.
+    const BarcodeScanResult result =
+        addBarcodeToCart(barcode, m_db, *inventoryManager, *cartService);
 
-    // ── 1. Database lookup ───────────────────────────────────────────────
-    Product product = m_db.getProductByBarcode(code);
-
-    if (product.id <= 0) {
-        const QString msg = QString("Unknown barcode: %1").arg(code);
+    switch (result.status) {
+    case BarcodeScanResult::Status::NotFound: {
+        const QString msg = QString("Unknown barcode: %1").arg(barcode.trimmed());
         statusLabel->setText(msg);
         showToast(msg, "warning");
-        qDebug() << "[Barcode] Not found:" << code;
-        return;
+        qDebug() << "[Barcode] Not found:" << barcode.trimmed();
+        break;
     }
-
-    // ── 2. Stock check ───────────────────────────────────────────────────
-    if (product.stockQuantity <= 0) {
-        const QString msg = QString("Out of stock: %1").arg(product.name);
+    case BarcodeScanResult::Status::OutOfStock: {
+        const QString msg = QString("Out of stock: %1").arg(result.product.name);
         statusLabel->setText(msg);
         showToast(msg, "error");
-        qDebug() << "[Barcode] Out of stock:" << product.name;
-        return;
+        qDebug() << "[Barcode] Out of stock:" << result.product.name;
+        break;
     }
-
-    // ── 3. Add to cart ───────────────────────────────────────────────────
-    // addToCart() handles duplicate merging, canSell() check, and UI refresh
-    addToCart(product, 1);
-
-    // ── 4. Visual feedback ───────────────────────────────────────────────
-    showToast(
-        QString("%1  —  %2")
-            .arg(product.name, formatCurrency(product.price)),
-        "success");
-
-    qDebug() << "[Barcode] Added:" << product.name
-             << " | stock remaining:" << (product.stockQuantity - 1);
+    case BarcodeScanResult::Status::Added:
+        showToast(
+            QString("%1  —  %2")
+                .arg(result.product.name, formatCurrency(result.product.price)),
+            "success");
+        qDebug() << "[Barcode] Added:" << result.product.name;
+        break;
+    }
 }
 
 void MainWindow::onBarcodeError(const QString &error)
@@ -631,6 +674,8 @@ void MainWindow::setupMenuBar()
             &QAction::triggered, this, &MainWindow::onReceiptSettings);
     connect(settingsMenu->addAction("Backup Now"),
             &QAction::triggered, this, &MainWindow::onBackupNow);
+    connect(settingsMenu->addAction("Mobile Scanner..."),
+            &QAction::triggered, this, &MainWindow::onShowMobileScanner);
     settingsMenu->addSeparator();
 
     // Theme submenu — one checkable entry per AppTheme. Selecting one routes
@@ -816,7 +861,7 @@ void MainWindow::setupCartPanel()
 
     cartModel = new CartModel(cartService, this);
     cartModel->setStockProvider([this](int productId) {
-        return m_db.getProductById(productId).stockQuantity;
+        return m_db.products().getProductById(productId).stockQuantity;
     });
 
     cartTable = new QTableView();
@@ -950,11 +995,11 @@ void MainWindow::setupActionButtons()
 
 void MainWindow::loadProducts()
 {
-    productModel->setProducts(m_db.getAllProducts());
+    productModel->setProducts(m_db.products().getAllProducts());
 
     // Repopulate categories, preserving the cashier's current filter.
     const QString previous = categoryCombo->currentText();
-    QStringList categories = m_db.getAllCategories();
+    QStringList categories = m_db.products().getAllCategories();
     categoryCombo->blockSignals(true);
     categoryCombo->clear();
     categoryCombo->addItem("All Categories");
@@ -963,6 +1008,12 @@ void MainWindow::loadProducts()
     categoryCombo->setCurrentIndex(idx >= 0 ? idx : 0);
     categoryCombo->blockSignals(false);
     productProxy->setCategory(categoryCombo->currentText());
+    updateProductEmptyState();
+}
+
+void MainWindow::syncProductGrid()
+{
+    productModel->syncProducts(m_db.products().getAllProducts());
     updateProductEmptyState();
 }
 
@@ -1097,7 +1148,7 @@ void MainWindow::onProductCardClicked(const QModelIndex &index)
         return;
 
     const int productId = index.data(ProductGridModel::ProductIdRole).toInt();
-    Product product = m_db.getProductById(productId);
+    Product product = m_db.products().getProductById(productId);
     if (product.id > 0 && product.stockQuantity > 0)
         addToCart(product, 1);
 }
@@ -1211,11 +1262,11 @@ void MainWindow::onCheckout()
     cartService->clearCurrent();
 
     for (int pid : soldProductIds)
-        productModel->updateStock(pid, m_db.getProductById(pid).stockQuantity);
+        productModel->updateStock(pid, m_db.products().getProductById(pid).stockQuantity);
 
     // A sale may push today's total over a configured sales-threshold schedule.
     scheduleManager->notifySalesThreshold(
-        m_db.getTotalSalesToday().toMajor());
+        m_db.salesAnalytics().getTotalSalesToday().toMajor());
 
     // Non-blocking success: a blocking dialog after every sale slows the queue.
     // Change due is the one figure the cashier must act on, so it stays in the
@@ -1226,7 +1277,7 @@ void MainWindow::onCheckout()
     if (redeemedPts > 0) {
         const Money creditValue = Money::fromCents(
             static_cast<qint64>(redeemedPts) * settingsManager->settings().loyaltyCentsPerPoint);
-        m_db.redeemLoyaltyPoints(
+        m_db.customers().redeemLoyaltyPoints(
             paymentDialog.getCustomerId(), redeemedPts, creditValue);
     }
 
@@ -1500,6 +1551,22 @@ void MainWindow::onManageInventory()
                                           "Opened inventory management");
 }
 
+void MainWindow::onShowMobileScanner()
+{
+    // Modeless + single instance, same reasoning as onManageInventory(): the
+    // cashier should be able to glance at pairing status without it blocking
+    // checkout.
+    if (m_mobileScannerDlg) {
+        m_mobileScannerDlg->raise();
+        m_mobileScannerDlg->activateWindow();
+        return;
+    }
+    auto *dialog = new MobileScannerDialog(apiServer, this);
+    dialog->setAttribute(Qt::WA_DeleteOnClose);
+    m_mobileScannerDlg = dialog;
+    dialog->show();
+}
+
 void MainWindow::onAddProduct()
 {
     if (!checkPermission(this, Permission::ADD_PRODUCTS, "add products"))
@@ -1745,9 +1812,9 @@ void MainWindow::onDailyReport()
     if (!checkPermission(this, Permission::VIEW_REPORTS, "view reports"))
         return;
 
-    const Money  todaySales       = m_db.getTotalSalesToday();
+    const Money  todaySales       = m_db.salesAnalytics().getTotalSalesToday();
     const int    todayTransactions =
-        m_db.getTotalTransactionsToday();
+        m_db.salesAnalytics().getTotalTransactionsToday();
     const Money  average = Money::fromCents(
         todayTransactions > 0 ? todaySales.cents() / todayTransactions : 0);
 

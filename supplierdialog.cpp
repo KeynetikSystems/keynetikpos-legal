@@ -3,6 +3,7 @@
 // for the full WHAT/HOW/WHY).
 // =============================================================================
 #include "supplierdialog.h"
+#include "supplierrepository.h"
 #include <QHeaderView>
 #include <QLabel>
 #include <QLineEdit>
@@ -64,7 +65,7 @@ void SupplierDialog::setupUI()
 
 void SupplierDialog::loadSuppliers()
 {
-    const QVector<Supplier> suppliers = m_db.getAllSuppliers();
+    const QVector<Supplier> suppliers = m_db.suppliers().getAllSuppliers();
     table->setRowCount(suppliers.size());
     for (int row = 0; row < suppliers.size(); ++row) {
         const Supplier &s = suppliers[row];
@@ -130,9 +131,9 @@ void SupplierDialog::onAddClicked()
     s.isActive = true;
     if (!runSupplierForm("Add Supplier", &s))
         return;
-    if (!m_db.addSupplier(s)) {
+    if (!m_db.suppliers().addSupplier(s)) {
         QMessageBox::critical(this, "Error",
-            "Failed to add supplier: " + m_db.getLastError());
+            "Failed to add supplier: " + m_db.suppliers().lastError());
         return;
     }
     loadSuppliers();
@@ -145,12 +146,12 @@ void SupplierDialog::onEditClicked()
         QMessageBox::information(this, "No Selection", "Select a supplier to edit.");
         return;
     }
-    Supplier s = m_db.getSupplierById(id);
+    Supplier s = m_db.suppliers().getSupplierById(id);
     if (!runSupplierForm("Edit Supplier", &s))
         return;
-    if (!m_db.updateSupplier(s)) {
+    if (!m_db.suppliers().updateSupplier(s)) {
         QMessageBox::critical(this, "Error",
-            "Failed to update supplier: " + m_db.getLastError());
+            "Failed to update supplier: " + m_db.suppliers().lastError());
         return;
     }
     loadSuppliers();
@@ -168,9 +169,9 @@ void SupplierDialog::onDeactivateClicked()
             "new purchase orders, but existing orders are unaffected.")
         != QMessageBox::Yes)
         return;
-    if (!m_db.deactivateSupplier(id)) {
+    if (!m_db.suppliers().deactivateSupplier(id)) {
         QMessageBox::critical(this, "Error",
-            "Failed to deactivate supplier: " + m_db.getLastError());
+            "Failed to deactivate supplier: " + m_db.suppliers().lastError());
         return;
     }
     loadSuppliers();

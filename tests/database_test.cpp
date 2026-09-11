@@ -16,8 +16,14 @@
 #include <QtTest>
 #include <QTemporaryDir>
 #include <QDate>
+#include <QDateTime>
+#include <QTimeZone>
 
 #include "database.h"
+#include "productrepository.h"
+#include "refundrepository.h"
+#include "salerepository.h"
+#include "salesanalyticsrepository.h"
 
 class DatabaseTest : public QObject
 {
@@ -40,9 +46,9 @@ private:
         p.profitMargin  = 100.0;           // selling = cost * 2 = price
         p.stockQuantity = stock;
         p.barcode       = barcode;
-        const bool ok = dbi().addProduct(p);
+        const bool ok = dbi().products().addProduct(p);
         Q_ASSERT(ok); Q_UNUSED(ok);
-        return dbi().getProductByBarcode(barcode).id;
+        return dbi().products().getProductByBarcode(barcode).id;
     }
 
     static SaleItem line(int productId, const QString &name, int qty, Money price)
@@ -100,14 +106,14 @@ private slots:
         const int pid = addProduct("REC1", m(10000), 10);
 
         QVector<SaleItem> items { line(pid, "Test REC1", 3, m(10000)) };
-        const int saleId = dbi().recordSale(sale(items, m(30000), m(0), m(0), m(30000),
+        const int saleId = dbi().sales().recordSale(sale(items, m(30000), m(0), m(0), m(30000),
                                             "Cash", m(30000), m(0)));
 
         QVERIFY(saleId > 0);
-        QCOMPARE(dbi().getStock(pid), 7);                 // 10 - 3
-        QCOMPARE(dbi().getSaleById(saleId).id, saleId);
-        QCOMPARE(dbi().getSaleItems(saleId).size(), 1);
-        QCOMPARE(dbi().getSaleById(saleId).total.cents(), 30000);
+        QCOMPARE(dbi().products().getStock(pid), 7);                 // 10 - 3
+        QCOMPARE(dbi().sales().getSaleById(saleId).id, saleId);
+        QCOMPARE(dbi().sales().getSaleItems(saleId).size(), 1);
+        QCOMPARE(dbi().sales().getSaleById(saleId).total.cents(), 30000);
     }
 
     // Item 6 + item 5: the cashier/shift_id audit columns are added by schema
@@ -122,10 +128,10 @@ private slots:
         r.cashier = "alice";
         r.shiftId = 42;
 
-        const int saleId = dbi().recordSale(r);
+        const int saleId = dbi().sales().recordSale(r);
         QVERIFY(saleId > 0);
 
-        const Sale s = dbi().getSaleById(saleId);
+        const Sale s = dbi().sales().getSaleById(saleId);
         QCOMPARE(s.cashier, QStringLiteral("alice"));
         QCOMPARE(s.shiftId, 42);
         QVERIFY(s.saleDate.isValid());
@@ -133,9 +139,9 @@ private slots:
 
     void recordSale_emptyItemsRejected()
     {
-        const int saleId = dbi().recordSale(sale({}, m(0), m(0), m(0), m(0), "Cash", m(0), m(0)));
+        const int saleId = dbi().sales().recordSale(sale({}, m(0), m(0), m(0), m(0), "Cash", m(0), m(0)));
         QCOMPARE(saleId, -1);
-        QVERIFY(dbi().getAllSales().isEmpty());
+        QVERIFY(dbi().sales().getAllSales().isEmpty());
     }
 
     void recordSale_persistsSplitTenders()
@@ -146,13 +152,13 @@ private slots:
             { "Cash",         m(4000), QString() },
             { "Mobile Money", m(6000), "SLJ7X8K2P0" },
         };
-        const int saleId = dbi().recordSale(sale(items, m(10000), m(0), m(0), m(10000),
+        const int saleId = dbi().sales().recordSale(sale(items, m(10000), m(0), m(0), m(10000),
                                             "Cash + Mobile Money", m(10000), m(0),
                                             0, m(0), pays));
         QVERIFY(saleId > 0);
 
         const QDate today = QDate::currentDate();
-        const auto totals = dbi().getPaymentTotalsByMethod(today, today);
+        const auto totals = dbi().salesAnalytics().getPaymentTotalsByMethod(today, today);
 
         qint64 cash = -1, mpesa = -1;
         for (const PaymentTotal &t : totals) {
@@ -161,6 +167,43 @@ private slots:
         }
         QCOMPARE(cash,  qint64(4000));
         QCOMPARE(mpesa, qint64(6000));
+    }
+
+    // The wall clock must not decide whether a sale is visible.
+    //
+    // sale_date is written by CURRENT_TIMESTAMP, which SQLite stores in UTC,
+    // while every analytics query takes LOCAL dates from QDate::currentDate().
+    // Comparing the two without converting drops sales made between local
+    // midnight and the UTC rollover — 00:00-03:00 in Kenya, prime trading hours
+    // for bars and 24-hour shops. This test pins a sale to a known UTC instant
+    // and asserts it is found under the local date that instant maps to, so it
+    // fails the same way at any hour rather than only during the gap.
+    void salesAreFilteredByLocalNotUtcDate()
+    {
+        const int pid = addProduct("TZ1", m(10000), 5);
+        QVector<SaleItem> items { line(pid, "Test TZ1", 1, m(10000)) };
+        QVector<SalePayment> pays { { "Cash", m(10000), QString() } };
+        const int saleId = dbi().sales().recordSale(sale(items, m(10000), m(0), m(0), m(10000),
+                                            "Cash", m(10000), m(0),
+                                            0, m(0), pays));
+        QVERIFY(saleId > 0);
+
+        // 23:30 UTC — the following local day everywhere east of Greenwich.
+        const QDateTime utc(QDate(2026, 3, 15), QTime(23, 30, 0), QTimeZone::UTC);
+        QVERIFY(dbi().executeQuery(
+            QStringLiteral("UPDATE sales SET sale_date = '%1' WHERE id = %2")
+                .arg(utc.toString(QStringLiteral("yyyy-MM-dd HH:mm:ss")))
+                .arg(saleId)));
+
+        const QDate localDay = utc.toLocalTime().date();
+
+        const auto totals = dbi().salesAnalytics().getPaymentTotalsByMethod(localDay, localDay);
+        qint64 cash = -1;
+        for (const PaymentTotal &t : totals)
+            if (t.method == "Cash") cash = t.total.cents();
+        QCOMPARE(cash, qint64(10000));
+
+        QCOMPARE(dbi().sales().getSalesByDateRange(localDay, localDay).size(), 1);
     }
 
     void recordSale_insufficientStockRollsBackEverything()
@@ -174,48 +217,48 @@ private slots:
             line(p1, "Test OK1",  5,  m(5000)),
             line(p2, "Test LOW1", 9999, m(5000)),
         };
-        const int saleId = dbi().recordSale(sale(items, m(0), m(0), m(0), m(0), "Cash", m(0), m(0)));
+        const int saleId = dbi().sales().recordSale(sale(items, m(0), m(0), m(0), m(0), "Cash", m(0), m(0)));
 
         QCOMPARE(saleId, -1);
-        QVERIFY(dbi().getAllSales().isEmpty());
-        QCOMPARE(dbi().getStock(p1), 10);   // untouched
-        QCOMPARE(dbi().getStock(p2), 1);    // untouched
+        QVERIFY(dbi().sales().getAllSales().isEmpty());
+        QCOMPARE(dbi().products().getStock(p1), 10);   // untouched
+        QCOMPARE(dbi().products().getStock(p2), 1);    // untouched
     }
 
     void processRefund_restoresStockAndMarksRefunded()
     {
         const int pid = addProduct("REF1", m(8000), 10);
         QVector<SaleItem> items { line(pid, "Test REF1", 4, m(8000)) };
-        const int saleId = dbi().recordSale(sale(items, m(32000), m(0), m(0), m(32000),
+        const int saleId = dbi().sales().recordSale(sale(items, m(32000), m(0), m(0), m(32000),
                                             "Cash", m(32000), m(0)));
         QVERIFY(saleId > 0);
-        QCOMPARE(dbi().getStock(pid), 6);
+        QCOMPARE(dbi().products().getStock(pid), 6);
 
-        QVERIFY(!dbi().isRefunded(saleId));
-        QVERIFY(dbi().processRefund(saleId, "customer return", "tester"));
-        QVERIFY(dbi().isRefunded(saleId));
-        QCOMPARE(dbi().getStock(pid), 10);   // 4 returned to stock
+        QVERIFY(!dbi().refunds().isRefunded(saleId));
+        QVERIFY(dbi().refunds().processRefund(saleId, "customer return", "tester"));
+        QVERIFY(dbi().refunds().isRefunded(saleId));
+        QCOMPARE(dbi().products().getStock(pid), 10);   // 4 returned to stock
     }
 
     void processRefund_doubleRefundGuarded()
     {
         const int pid = addProduct("REF2", m(8000), 10);
         QVector<SaleItem> items { line(pid, "Test REF2", 4, m(8000)) };
-        const int saleId = dbi().recordSale(sale(items, m(32000), m(0), m(0), m(32000),
+        const int saleId = dbi().sales().recordSale(sale(items, m(32000), m(0), m(0), m(32000),
                                             "Cash", m(32000), m(0)));
         QVERIFY(saleId > 0);
 
-        QVERIFY(dbi().processRefund(saleId, "first", "tester"));
-        QCOMPARE(dbi().getStock(pid), 10);
+        QVERIFY(dbi().refunds().processRefund(saleId, "first", "tester"));
+        QCOMPARE(dbi().products().getStock(pid), 10);
 
         // A second refund must be refused and must NOT restore stock again.
-        QVERIFY(!dbi().processRefund(saleId, "second", "tester"));
-        QCOMPARE(dbi().getStock(pid), 10);   // still 10, not 14
+        QVERIFY(!dbi().refunds().processRefund(saleId, "second", "tester"));
+        QCOMPARE(dbi().products().getStock(pid), 10);   // still 10, not 14
     }
 
     void processRefund_unknownSaleFails()
     {
-        QVERIFY(!dbi().processRefund(99999, "n/a", "tester"));
+        QVERIFY(!dbi().refunds().processRefund(99999, "n/a", "tester"));
     }
 
     // The cents migration must run exactly once: PRAGMA user_version has to
@@ -233,12 +276,12 @@ private slots:
         QVERIFY(dbi().executeQuery(
             "INSERT OR IGNORE INTO categories (name) VALUES ('Test')"));
         const int pid = addProduct("PERSIST1", m(12300), 5);
-        QCOMPARE(dbi().getProductByBarcode("PERSIST1").price.cents(), 12300);
+        QCOMPARE(dbi().products().getProductByBarcode("PERSIST1").price.cents(), 12300);
 
         // Reopen the same file, as a fresh launch would.
         dbi().configureForTesting(path);
         QVERIFY(dbi().initialize(/*seedSampleData=*/false));
-        QCOMPARE(dbi().getProductById(pid).price.cents(), 12300);  // NOT *100
+        QCOMPARE(dbi().products().getProductById(pid).price.cents(), 12300);  // NOT *100
     }
 };
 

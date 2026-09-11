@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.16)
-project(KeynetikPOS VERSION 2.0.0 LANGUAGES CXX)
+project(KeynetikPOS VERSION 2.1.0 LANGUAGES CXX)
 
 set(CMAKE_AUTOUIC ON)
 set(CMAKE_AUTOMOC ON)
@@ -13,12 +13,15 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 find_package(QT NAMES Qt6 Qt5 REQUIRED COMPONENTS Widgets Core Sql PrintSupport Network Concurrent)
 find_package(Qt${QT_VERSION_MAJOR} REQUIRED COMPONENTS Widgets Core Sql PrintSupport Network Concurrent)
 find_package(Qt${QT_VERSION_MAJOR} REQUIRED COMPONENTS SerialPort)
+# HttpServer backs the LAN-local mobile-scanner API (posapiserver.cpp) — Qt6-only,
+# so it's its own find_package call rather than joining the Qt5-compatible line above.
+find_package(Qt${QT_VERSION_MAJOR} REQUIRED COMPONENTS HttpServer)
 
 # ============================================================
 # App Metadata
 # ============================================================
 set(APP_NAME "KeynetikPOS")
-set(APP_VERSION "2.0.0")
+set(APP_VERSION "2.1.0")
 set(APP_PUBLISHER "Keynetik Solutions")
 set(APP_DESCRIPTION "Next-GEN Professional Point of Sale System")
 set(APP_URL "https://www.keynetik.com")
@@ -26,12 +29,20 @@ set(APP_URL "https://www.keynetik.com")
 # ============================================================
 # Resources
 # ============================================================
+# The Windows resource script is GENERATED from resources/app.rc.in so the icon
+# and the version block track APP_VERSION automatically — a hand-maintained .rc
+# drifts (the previous static app.rc still claimed 1.0.0.0 at version 2.1.0).
+# The template interpolates CMAKE_CURRENT_SOURCE_DIR for the icon path because
+# the generated file lands in the build tree, where a relative path would not
+# resolve.
 set(WINDOWS_RC_FILE "")
 if(WIN32)
-    set(RC_SOURCE "${CMAKE_CURRENT_SOURCE_DIR}/resources/app.rc")
-    if(EXISTS "${RC_SOURCE}")
-        set(WINDOWS_RC_FILE "${RC_SOURCE}")
-    endif()
+    configure_file(
+        "${CMAKE_CURRENT_SOURCE_DIR}/resources/app.rc.in"
+        "${CMAKE_CURRENT_BINARY_DIR}/app.rc"
+        @ONLY
+    )
+    set(WINDOWS_RC_FILE "${CMAKE_CURRENT_BINARY_DIR}/app.rc")
 endif()
 
 set(QT_RESOURCE_FILE "")
@@ -115,6 +126,9 @@ set(PROJECT_SOURCES
     licensemanager.h licensemanager.cpp
     mpesaclient.h mpesaclient.cpp
     antidebug.h
+    barcodescan.h barcodescan.cpp
+    posapiserver.h posapiserver.cpp
+    mobilescannerdialog.h mobilescannerdialog.cpp
     ${QT_RESOURCE_FILE}
     ${WINDOWS_RC_FILE}
 )
@@ -155,6 +169,7 @@ target_link_libraries(KeynetikPOS PRIVATE
     Qt${QT_VERSION_MAJOR}::Concurrent
 )
 target_link_libraries(KeynetikPOS PRIVATE Qt${QT_VERSION_MAJOR}::SerialPort)
+target_link_libraries(KeynetikPOS PRIVATE Qt${QT_VERSION_MAJOR}::HttpServer)
 
 # DPAPI (CryptProtectData) for SecretStore — Windows credential encryption.
 if(WIN32)
@@ -380,4 +395,104 @@ if(KEYNETIK_BUILD_TESTS)
         Qt${QT_VERSION_MAJOR}::Test
     )
     add_test(NAME salejournal_test COMMAND salejournal_test)
+
+    # The checkout pipeline runs with an injected operator and no UserManager
+    # session — the win from the singleton decouple. Pulls in CheckoutService's
+    # real collaborators (Database/repos, InventoryManager, ReceiptPrinter, the
+    # ledger/journal); the printer is null at runtime so the QPrinter/PDF path
+    # never executes (hence GUI-less), but ReceiptPrinter is still linked because
+    # finalizeSale references its symbol.
+    add_executable(checkoutservice_test
+        tests/checkoutservice_test.cpp
+        checkoutservice.cpp checkoutservice.h
+        carttotals.cpp carttotals.h
+        database.cpp database.h
+        salerepository.cpp salerepository.h
+        supplierrepository.cpp supplierrepository.h
+        customerrepository.cpp customerrepository.h
+        productrepository.cpp productrepository.h
+        expenserepository.cpp expenserepository.h
+        purchaseorderrepository.cpp purchaseorderrepository.h
+        refundrepository.cpp refundrepository.h
+        salesanalyticsrepository.cpp salesanalyticsrepository.h
+        inventorymanager.cpp inventorymanager.h
+        colorscheme.cpp colorscheme.h
+        receiptprinter.cpp receiptprinter.h
+        smtpclient.cpp smtpclient.h
+        ledger.cpp ledger.h
+        salejournal.cpp salejournal.h
+    )
+    set_target_properties(checkoutservice_test PROPERTIES AUTOMOC ON)
+    target_include_directories(checkoutservice_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+    target_compile_options(checkoutservice_test PRIVATE ${KEYNETIK_WARNINGS})
+    target_link_libraries(checkoutservice_test PRIVATE
+        Qt${QT_VERSION_MAJOR}::Core
+        Qt${QT_VERSION_MAJOR}::Gui
+        Qt${QT_VERSION_MAJOR}::Widgets
+        Qt${QT_VERSION_MAJOR}::Sql
+        Qt${QT_VERSION_MAJOR}::Network
+        Qt${QT_VERSION_MAJOR}::PrintSupport
+        Qt${QT_VERSION_MAJOR}::Test
+    )
+    add_test(NAME checkoutservice_test COMMAND checkoutservice_test)
+
+    # addBarcodeToCart() stock-validation contract, shared by the serial
+    # scanner and the LAN mobile-scanner API — no checkout/printer/GL involved.
+    add_executable(barcodescan_test
+        tests/barcodescan_test.cpp
+        barcodescan.cpp barcodescan.h
+        database.cpp database.h
+        salerepository.cpp salerepository.h
+        supplierrepository.cpp supplierrepository.h
+        customerrepository.cpp customerrepository.h
+        productrepository.cpp productrepository.h
+        expenserepository.cpp expenserepository.h
+        purchaseorderrepository.cpp purchaseorderrepository.h
+        refundrepository.cpp refundrepository.h
+        salesanalyticsrepository.cpp salesanalyticsrepository.h
+        inventorymanager.cpp inventorymanager.h
+        cartservice.cpp cartservice.h
+        colorscheme.cpp colorscheme.h
+    )
+    set_target_properties(barcodescan_test PROPERTIES AUTOMOC ON)
+    target_include_directories(barcodescan_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+    target_compile_options(barcodescan_test PRIVATE ${KEYNETIK_WARNINGS})
+    target_link_libraries(barcodescan_test PRIVATE
+        Qt${QT_VERSION_MAJOR}::Core
+        Qt${QT_VERSION_MAJOR}::Gui
+        Qt${QT_VERSION_MAJOR}::Sql
+        Qt${QT_VERSION_MAJOR}::Network
+        Qt${QT_VERSION_MAJOR}::Test
+    )
+    add_test(NAME barcodescan_test COMMAND barcodescan_test)
+
+    # ProductGridModel::syncProducts() diff contract (add/remove/update rows
+    # without a full model reset). No live DB — Product structs built by hand.
+    add_executable(productgridmodel_test
+        tests/productgridmodel_test.cpp
+        productgridmodel.cpp productgridmodel.h
+        database.cpp database.h
+        salerepository.cpp salerepository.h
+        supplierrepository.cpp supplierrepository.h
+        customerrepository.cpp customerrepository.h
+        productrepository.cpp productrepository.h
+        expenserepository.cpp expenserepository.h
+        purchaseorderrepository.cpp purchaseorderrepository.h
+        refundrepository.cpp refundrepository.h
+        salesanalyticsrepository.cpp salesanalyticsrepository.h
+        inventorymanager.cpp inventorymanager.h
+        colorscheme.cpp colorscheme.h
+    )
+    set_target_properties(productgridmodel_test PROPERTIES AUTOMOC ON)
+    target_include_directories(productgridmodel_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+    target_compile_options(productgridmodel_test PRIVATE ${KEYNETIK_WARNINGS})
+    target_link_libraries(productgridmodel_test PRIVATE
+        Qt${QT_VERSION_MAJOR}::Core
+        Qt${QT_VERSION_MAJOR}::Gui
+        Qt${QT_VERSION_MAJOR}::Widgets
+        Qt${QT_VERSION_MAJOR}::Sql
+        Qt${QT_VERSION_MAJOR}::Network
+        Qt${QT_VERSION_MAJOR}::Test
+    )
+    add_test(NAME productgridmodel_test COMMAND productgridmodel_test)
 endif()

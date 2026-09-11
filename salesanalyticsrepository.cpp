@@ -21,7 +21,12 @@ SalesAnalyticsRepository::SalesAnalyticsRepository(QSqlDatabase db)
 Money SalesAnalyticsRepository::getTotalSalesToday()
 {
     QSqlQuery query(m_db);
-    query.prepare("SELECT SUM(total) FROM sales WHERE DATE(sale_date) = DATE('now')");
+    // sale_date defaults to CURRENT_TIMESTAMP, which SQLite writes in UTC, so
+    // both sides are converted to local time before comparing — otherwise a
+    // sale made after local midnight but before UTC rolls over is attributed
+    // to the previous day. See the comment on sales.sale_date in database.cpp.
+    query.prepare("SELECT SUM(total) FROM sales "
+                  "WHERE DATE(sale_date, 'localtime') = DATE('now', 'localtime')");
     if (query.exec() && query.next()) {
         return Money::fromCents(query.value(0).toLongLong());
     }
@@ -31,7 +36,8 @@ Money SalesAnalyticsRepository::getTotalSalesToday()
 Money SalesAnalyticsRepository::getTotalSalesThisMonth()
 {
     QSqlQuery query(m_db);
-    query.prepare("SELECT SUM(total) FROM sales WHERE strftime('%Y-%m', sale_date) = strftime('%Y-%m', 'now')");
+    query.prepare("SELECT SUM(total) FROM sales WHERE "
+                  "strftime('%Y-%m', sale_date, 'localtime') = strftime('%Y-%m', 'now', 'localtime')");
     if (query.exec() && query.next()) {
         return Money::fromCents(query.value(0).toLongLong());
     }
@@ -41,7 +47,8 @@ Money SalesAnalyticsRepository::getTotalSalesThisMonth()
 int SalesAnalyticsRepository::getTotalTransactionsToday()
 {
     QSqlQuery query(m_db);
-    query.prepare("SELECT COUNT(*) FROM sales WHERE DATE(sale_date) = DATE('now')");
+    query.prepare("SELECT COUNT(*) FROM sales "
+                  "WHERE DATE(sale_date, 'localtime') = DATE('now', 'localtime')");
     if (query.exec() && query.next()) {
         return query.value(0).toInt();
     }
@@ -75,11 +82,11 @@ QVector<PaymentTotal> SalesAnalyticsRepository::getPaymentTotalsByMethod(const Q
         "SELECT method, SUM(amount) AS total, COUNT(*) AS cnt FROM ("
         "  SELECT sp.method AS method, sp.amount AS amount "
         "    FROM sale_payments sp JOIN sales s ON sp.sale_id = s.id "
-        "    WHERE DATE(s.sale_date) BETWEEN ? AND ? "
+        "    WHERE DATE(s.sale_date, 'localtime') BETWEEN ? AND ?"
         "  UNION ALL "
         "  SELECT s.payment_method AS method, s.total AS amount "
         "    FROM sales s "
-        "    WHERE DATE(s.sale_date) BETWEEN ? AND ? "
+        "    WHERE DATE(s.sale_date, 'localtime') BETWEEN ? AND ?"
         "      AND NOT EXISTS (SELECT 1 FROM sale_payments sp2 WHERE sp2.sale_id = s.id)"
         ") GROUP BY method ORDER BY total DESC");
     query.addBindValue(startDate);
@@ -105,7 +112,7 @@ Money SalesAnalyticsRepository::getActualGrossProfit(const QDate &startDate, con
         "SELECT SUM((si.price - si.cost_price) * si.quantity) as total_profit "
         "FROM sale_items si "
         "JOIN sales s ON si.sale_id = s.id "
-        "WHERE DATE(s.sale_date) BETWEEN ? AND ?");
+        "WHERE DATE(s.sale_date, 'localtime') BETWEEN ? AND ?");
     query.addBindValue(startDate.toString(Qt::ISODate));
     query.addBindValue(endDate.toString(Qt::ISODate));
     if (query.exec() && query.next()) {
@@ -121,7 +128,7 @@ Money SalesAnalyticsRepository::getActualGrossProfitToday()
         "SELECT SUM((si.price - si.cost_price) * si.quantity) as total_profit "
         "FROM sale_items si "
         "JOIN sales s ON si.sale_id = s.id "
-        "WHERE DATE(s.sale_date) = DATE('now')");
+        "WHERE DATE(s.sale_date, 'localtime') = DATE('now', 'localtime')");
     if (query.exec() && query.next()) {
         return Money::fromCents(query.value("total_profit").toLongLong());
     }
@@ -135,7 +142,8 @@ Money SalesAnalyticsRepository::getActualGrossProfitThisMonth()
         "SELECT SUM((si.price - si.cost_price) * si.quantity) as total_profit "
         "FROM sale_items si "
         "JOIN sales s ON si.sale_id = s.id "
-        "WHERE strftime('%Y-%m', s.sale_date) = strftime('%Y-%m', 'now')");
+        "WHERE strftime('%Y-%m', s.sale_date, 'localtime') = "
+        "      strftime('%Y-%m', 'now', 'localtime')");
     if (query.exec() && query.next()) {
         return Money::fromCents(query.value("total_profit").toLongLong());
     }
@@ -152,12 +160,12 @@ QVector<Database::ProfitLossRow> SalesAnalyticsRepository::getProfitLossByDateRa
 
     QSqlQuery q(m_db);
     q.prepare(
-        "SELECT substr(s.sale_date,1,10) AS day, "
+        "SELECT DATE(s.sale_date, 'localtime') AS day, "
         "       SUM(s.total)             AS revenue, "
         "       SUM(si.quantity * si.cost_price) AS cogs "
         "FROM sales s "
         "JOIN sale_items si ON si.sale_id = s.id "
-        "WHERE substr(s.sale_date,1,10) BETWEEN ? AND ? "
+        "WHERE DATE(s.sale_date, 'localtime') BETWEEN ? AND ? "
         "GROUP BY day ORDER BY day");
     q.addBindValue(start);
     q.addBindValue(end);

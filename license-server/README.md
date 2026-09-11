@@ -69,23 +69,86 @@ Tiers are **one-time / perpetual** — the pitch is "pay once" vs. competitors'
 monthly SaaS (each tier costs well under a year of the tool it replaces, then
 it's free forever).
 
-| Tier | Plan | One-time price | Unlocks |
-|---|---|---|---|
-| 1 | POS Core | (floor) | checkout, products, inventory, M-Pesa, receipts |
-| 2 | POS Pro | **KSh 8,000** | reports, analytics, users, schedules, barcode, messaging |
-| 3 | ERP Lite | **KSh 18,000** | suppliers, purchase orders, expenses, customers, P&L |
-| 4 | ERP Full | **KSh 35,000** | general ledger, payroll, VAT |
+| Tier | Plan | KES (M-Pesa) | USD (card) | Unlocks |
+|---|---|---|---|---|
+| 1 | POS Core | (floor) | (floor) | checkout, products, inventory, M-Pesa, receipts |
+| 2 | POS Pro | **KSh 8,000** | **$59** | reports, analytics, users, schedules, barcode, messaging |
+| 3 | ERP Lite | **KSh 18,000** | **$139** | suppliers, purchase orders, expenses, customers, P&L |
+| 4 | ERP Full | **KSh 35,000** | **$269** | general ledger, payroll, VAT |
 
-These prices are the `tierForAmount()` constants in `src/index.js` — the
-**self-serve M-Pesa** price list: a customer pays the tier's price and the
-Worker grants that tier (paying between tiers rounds down; any completed payment
-grants at least POS Core). To change a price, edit the constant and re-deploy.
+**USD is the single source of truth**, set in `src/index.js` as
+`PRICE_POS_PRO_USD` / `PRICE_ERP_LITE_USD` / `PRICE_ERP_FULL_USD`, read by
+`tierForAmountUsd()` for the **Stripe** flow. The KES column — what an
+M-Pesa payer actually sends — is **derived** from those USD prices via
+`kesFromUsd()` (a static `USD_TO_KES_RATE` constant, rounded to the nearest
+KSh 1,000) into `PRICE_POS_PRO` / `PRICE_ERP_LITE` / `PRICE_ERP_FULL`, read
+by `tierForAmount()` for the **self-serve M-Pesa** flow (a customer pays the
+tier's KES price and the Worker grants that tier; paying between tiers
+rounds down; any completed payment grants at least POS Core).
+
+To change a price, edit the USD constant and re-deploy — the KES price moves
+with it automatically. `USD_TO_KES_RATE` is a static, periodically
+hand-checked constant (like the tier prices themselves) rather than a live
+FX lookup: a live rate at payment time could disagree with whatever rate the
+website showed the customer when they decided what to send, and a Cloudflare
+Worker on the payment-critical path is not the place to add a new external
+dependency and failure mode for that. Re-check the rate and re-deploy if it
+drifts meaningfully from `USD_TO_KES_RATE`.
 
 Multi-till deals grant more device seats and are sold **manually**
-(`New-License -Tier N -MaxDevices M`), not through the M-Pesa price map.
+(`New-License -Tier N -MaxDevices M`), not through either self-serve price map.
 
-> Prices are a market-positioned starting point — validate against current local
-> competitor quotes (Loyverse add-ons, QuickBooks KE, Odoo/Sage) before publishing.
+> The USD prices are a market-positioned starting point, not independently
+> researched — validate against current local/international competitor quotes
+> (Loyverse add-ons, QuickBooks KE, Odoo/Sage) before publishing. They also
+> have no history in this repo before this pass: earlier versions set the KES
+> price directly and had no USD price at all. The derived KES amounts happen
+> to land on the exact prices this server was already charging before this
+> change (at the `USD_TO_KES_RATE` checked 2026-08) — a coincidence of
+> reasonable rounding, not by design, and something to re-verify if either
+> number moves.
+
+## Update entitlement & renewals
+
+Separate from the perpetual license, a key can carry an optional
+`updates_until` date (migration `0002_add_updates_until.sql`). Past that date
+the key keeps activating and validating exactly as before — **it never
+disables the software** — `/activate` and `/validate` just stop the point
+where the client would otherwise learn about a date to show the user. There is
+currently no client-side enforcement beyond exposing the date
+(`LicenseManager::updatesValidUntil()`); what changes on the business side is
+simply whether you ship that customer a new installer.
+
+Suggested renewal pricing (not yet wired into `tierForAmount()` — these are
+manual/self-serve-reference renewals, not new-key purchases): roughly a third
+of the tier's one-time price per year — **POS Pro** ~KSh 2,800/yr, **ERP
+Lite** ~KSh 6,000/yr, **ERP Full** ~KSh 12,000/yr. POS Core has no renewal;
+it's free and updated forever. ERP Full is the strongest case for actually
+renewing, not just the priciest: payroll and VAT are compliance features tied
+to statutory rates that change with each Finance Act
+(`docs/STATUTORY_RATES.md`), so a stale ERP Full install risks miscalculating
+PAYE or VAT, not just missing new features.
+
+Two ways to record a renewal payment:
+
+- **Admin (any payment channel — bank transfer, cash, Stripe, manual M-Pesa):**
+  `POST /admin/renew` with `{ "key": "...", "months": 12 }` (`months` optional,
+  defaults to 12). Extends from the *later* of today and the key's current
+  `updates_until`, so renewing early never wastes the remainder already paid
+  for.
+- **Self-serve M-Pesa:** a C2B/Paybill payment whose reference (`BillRefNumber`)
+  is an existing, unrevoked license key — instead of an email or blank — is
+  treated as a renewal for that key rather than a new-key sale (see
+  `/webhook/mpesa` in `src/index.js`). The reference must pass the same
+  checksum the client validates keys with, so a garbled or unrelated reference
+  can't accidentally get treated as one. A confirmation SMS with the new
+  `updates_until` date is sent back to the payer.
+
+**Not yet built:** a Stripe equivalent of the M-Pesa path above (would need a
+separate Stripe Payment Link with a custom field for the existing key, since
+`/webhook/stripe` currently has no way to distinguish a renewal from a new
+purchase), and any in-app surface for `updatesValidUntil()` — it's there to
+read, but no dialog shows it yet.
 
 ## Day-to-day key management
 
@@ -109,6 +172,16 @@ Revoke a key (refund/chargeback):
 ```powershell
 curl -X POST "https://<your-worker>/admin/revoke?key=ABCD-1F2E-WXYZ-9876" `
   -H "Authorization: Bearer <ADMIN_TOKEN>"
+```
+
+Renew a key's update entitlement (payment received outside the M-Pesa
+self-serve path — see "Update entitlement & renewals" above):
+
+```powershell
+curl -X POST "https://<your-worker>/admin/renew" `
+  -H "Authorization: Bearer <ADMIN_TOKEN>" `
+  -H "Content-Type: application/json" `
+  -d '{"key":"ABCD-1F2E-WXYZ-9876","months":12}'
 ```
 
 List keys and seat usage:
@@ -149,8 +222,25 @@ wrangler secret put MPESA_SHORTCODE       # sandbox: 174379
 wrangler secret put MPESA_PASSKEY
 # vars (wrangler.toml [vars] or --var): MPESA_ENV=sandbox|production,
 #                                       MPESA_TXN_TYPE=paybill|buygoods
+#                                       MPESA_TILL_NUMBER=<till>  (buygoods only)
 wrangler deploy
 ```
+
+**Paybill vs Buy Goods (till).** Daraja treats these differently and the
+difference is easy to get wrong:
+
+| | `BusinessShortCode` | `PartyB` |
+|---|---|---|
+| Paybill  | Paybill number | same number |
+| Buy Goods | Head Office / store number | the **till** number |
+
+`BusinessShortCode` is also what the `Password` hash is built from, so it must
+be the number your passkey was issued against — for Buy Goods that is the HO
+number, never the till. Set `MPESA_TILL_NUMBER` to the till; leaving it unset
+falls back to `MPESA_SHORTCODE`, which is right for Paybill and wrong for a
+real till. Sandbox does not enforce the pairing, so a Buy Goods config can
+return `ResponseCode: 0` in sandbox and still fail in production — verify with
+a small live transaction at go-live.
 
 In the Daraja portal, set the app's STK callback URL to
 `https://<your-worker>/pos/mpesa/callback`. A till only gets STK if it's

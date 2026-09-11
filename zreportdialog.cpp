@@ -166,7 +166,7 @@ ZReportData ZReportDialog::buildReport(const QDate &date, int shiftId)
               "       COALESCE(SUM(discount), 0), "
               "       COALESCE(SUM(tax),      0) "
               "FROM sales "
-              "WHERE substr(sale_date, 1, 10) = ?");
+              "WHERE DATE(sale_date, 'localtime') = ?");
     q.addBindValue(day);
     if (q.exec() && q.next()) {
         data.transactionCount = q.value(0).toInt();
@@ -190,7 +190,7 @@ ZReportData ZReportDialog::buildReport(const QDate &date, int shiftId)
     // ── Sales by payment method ──────────────────────────
     q.prepare("SELECT payment_method, COUNT(*), COALESCE(SUM(total), 0) "
               "FROM sales "
-              "WHERE substr(sale_date, 1, 10) = ? "
+              "WHERE DATE(sale_date, 'localtime') = ? "
               "GROUP BY payment_method ORDER BY 3 DESC");
     q.addBindValue(day);
     if (q.exec()) {
@@ -211,7 +211,7 @@ ZReportData ZReportDialog::buildReport(const QDate &date, int shiftId)
               "FROM sales s "
               "JOIN sale_items si ON si.sale_id = s.id "
               "JOIN products   p  ON p.id = si.product_id "
-              "WHERE substr(s.sale_date, 1, 10) = ? "
+              "WHERE DATE(s.sale_date, 'localtime') = ? "
               "GROUP BY p.category ORDER BY 3 DESC");
     q.addBindValue(day);
     if (q.exec()) {
@@ -230,7 +230,7 @@ ZReportData ZReportDialog::buildReport(const QDate &date, int shiftId)
               "       COALESCE(SUM(si.subtotal), 0) "
               "FROM sales s "
               "JOIN sale_items si ON si.sale_id = s.id "
-              "WHERE substr(s.sale_date, 1, 10) = ? "
+              "WHERE DATE(s.sale_date, 'localtime') = ? "
               "GROUP BY si.product_id "
               "ORDER BY 3 DESC LIMIT 10");
     q.addBindValue(day);
@@ -504,7 +504,7 @@ QString ZReportDialog::generateZReportText(QSqlDatabase &db,
 
     q.prepare("SELECT COUNT(*), COALESCE(SUM(total),0), "
               "COALESCE(SUM(discount),0), COALESCE(SUM(tax),0) "
-              "FROM sales WHERE substr(sale_date,1,10) = ?");
+              "FROM sales WHERE DATE(sale_date, 'localtime') = ?");
     q.addBindValue(day);
     if (q.exec() && q.next()) {
         const double gross  = q.value(1).toLongLong() / 100.0;
@@ -524,7 +524,7 @@ QString ZReportDialog::generateZReportText(QSqlDatabase &db,
     }
 
     q.prepare("SELECT payment_method, COUNT(*), COALESCE(SUM(total),0) "
-              "FROM sales WHERE substr(sale_date,1,10) = ? "
+              "FROM sales WHERE DATE(sale_date, 'localtime') = ? "
               "GROUP BY payment_method ORDER BY 3 DESC");
     q.addBindValue(day);
     if (q.exec()) {
@@ -542,7 +542,7 @@ QString ZReportDialog::generateZReportText(QSqlDatabase &db,
               "COALESCE(SUM(si.subtotal),0) "
               "FROM sales s JOIN sale_items si ON si.sale_id=s.id "
               "JOIN products p ON p.id=si.product_id "
-              "WHERE substr(s.sale_date,1,10)=? "
+              "WHERE DATE(s.sale_date, 'localtime')=? "
               "GROUP BY p.category ORDER BY 3 DESC");
     q.addBindValue(day);
     if (q.exec()) {
@@ -558,7 +558,7 @@ QString ZReportDialog::generateZReportText(QSqlDatabase &db,
     q.prepare("SELECT si.product_name, COALESCE(SUM(si.quantity),0), "
               "COALESCE(SUM(si.subtotal),0) "
               "FROM sales s JOIN sale_items si ON si.sale_id=s.id "
-              "WHERE substr(s.sale_date,1,10)=? "
+              "WHERE DATE(s.sale_date, 'localtime')=? "
               "GROUP BY si.product_id ORDER BY 3 DESC LIMIT 10");
     q.addBindValue(day);
     if (q.exec()) {

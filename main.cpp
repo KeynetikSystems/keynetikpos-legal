@@ -25,6 +25,7 @@
 #include "colorscheme.h"
 #include "appstyle.h"
 #include <QApplication>
+#include <QIcon>
 #include <QMessageBox>
 #include <QInputDialog>
 #include <QTimer>
@@ -107,6 +108,12 @@ int main(int argc, char *argv[])
         Qt::HighDpiScaleFactorRoundingPolicy::PassThrough);
 
     QApplication a(argc, argv);
+
+    // Window/taskbar icon. Set on the APPLICATION (not per-window) and before
+    // anything is shown, so the licence prompts and the login dialog — which
+    // both appear before MainWindow exists — are branded too. The executable's
+    // own icon is a separate thing, embedded from resources/app.rc.in.
+    a.setWindowIcon(QIcon(QStringLiteral(":/app.png")));
 
     // Theme everything from the start so the license prompts and the login
     // dialog match the persisted theme. MainWindow::applyTheme() re-applies on

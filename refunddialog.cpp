@@ -2,6 +2,8 @@
 // refunddialog.cpp — Implementation of RefundDialog (see refunddialog.h).
 // =============================================================================
 #include "refunddialog.h"
+#include "refundrepository.h"
+#include "salerepository.h"
 
 #include <QHeaderView>
 #include <QMessageBox>
@@ -111,7 +113,7 @@ void RefundDialog::setupUI()
 void RefundDialog::onLoadSale()
 {
     const int id = saleIdSpin->value();
-    Sale sale = m_db.getSaleById(id);
+    Sale sale = m_db.sales().getSaleById(id);
 
     if (sale.id <= 0) {
         QMessageBox::warning(this, "Sale Not Found",
@@ -122,9 +124,9 @@ void RefundDialog::onLoadSale()
 
     m_loadedSaleId = id;
     populateSaleInfo(sale);
-    populateSaleItems(m_db.getSaleItems(id));
+    populateSaleItems(m_db.sales().getSaleItems(id));
 
-    const bool alreadyRefunded = m_db.isRefunded(id);
+    const bool alreadyRefunded = m_db.refunds().isRefunded(id);
     refundedLabel->setVisible(alreadyRefunded);
     refundButton->setEnabled(!alreadyRefunded);
     setSaleLoaded(true);
@@ -185,9 +187,9 @@ void RefundDialog::onProcessRefund()
 
     const QString cashier = UserManager::instance().getCurrentUser().fullName;
 
-    if (!m_db.processRefund(m_loadedSaleId, reason, cashier)) {
+    if (!m_db.refunds().processRefund(m_loadedSaleId, reason, cashier)) {
         QMessageBox::critical(this, "Refund Failed",
-            "Could not process refund: " + m_db.getLastError());
+            "Could not process refund: " + m_db.refunds().lastError());
         return;
     }
 

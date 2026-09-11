@@ -22,6 +22,7 @@
 
 #include <QString>
 #include <QVector>
+#include <functional>
 
 #include "cart.h"
 #include "carttotals.h"        // CartTotals, computeCartTotals()
@@ -36,10 +37,27 @@ struct CheckoutResult {
     QString error;
 };
 
+// Who is ringing up the sale, plus where audit lines go. Injected so the
+// checkout pipeline never reaches into the UserManager singleton — that keeps
+// the money path constructible (and unit-testable) without a logged-in session.
+// In production MainWindow builds this from UserManager::instance(); tests pass
+// a fixed identity and a no-op (or recording) log. Identity is captured when the
+// CheckoutService is built, which is once per login (MainWindow is recreated on
+// every logout->login), so it always reflects the operator on this terminal.
+struct OperatorContext {
+    QString username;   // stamped on the sale row (audit trail)
+    QString fullName;   // printed on the receipt
+    // Audit sink for pipeline events (sale completed, GL post failure).
+    // Defaults to a no-op so a test can ignore it entirely.
+    std::function<void(const QString &action, const QString &details)> log
+        = [](const QString &, const QString &) {};
+};
+
 class CheckoutService
 {
 public:
-    CheckoutService(Database &db, InventoryManager *inventory, ReceiptPrinter *printer);
+    CheckoutService(Database &db, InventoryManager *inventory, ReceiptPrinter *printer,
+                    OperatorContext op);
 
     CheckoutResult finalizeSale(const Cart &cart, const CartTotals &totals,
                                 const QString &paymentMethod,
@@ -53,6 +71,7 @@ private:
     Database &m_db;
     InventoryManager *m_inventory;
     ReceiptPrinter   *m_printer;
+    OperatorContext   m_operator;
 };
 
 #endif // CHECKOUTSERVICE_H

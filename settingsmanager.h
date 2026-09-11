@@ -71,7 +71,12 @@ class SettingsManager : public QObject
     Q_OBJECT
 
 public:
-    explicit SettingsManager(QSqlDatabase &db, QObject *parent = nullptr);
+    // db is held BY VALUE (cheap, ref-counted handle) so it stays valid even
+    // if the caller's QSqlDatabase local goes out of scope — the same
+    // reasoning as every repository class (see e.g. productrepository.h).
+    // This used to be a reference, which is what let a MainWindow-ctor-local
+    // QSqlDatabase dangle after construction — see the crash this fixed.
+    explicit SettingsManager(QSqlDatabase db, QObject *parent = nullptr);
 
     // Load from DB
     void load();
@@ -109,6 +114,6 @@ private:
     QString getSetting(const QString &key, const QString &defaultValue = "") const;
     void    setSetting(const QString &key, const QString &value);
 
-    QSqlDatabase &m_db;
+    QSqlDatabase m_db;
     BusinessSettings m_settings;
 };

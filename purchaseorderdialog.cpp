@@ -6,6 +6,9 @@
 #include "usermanager.h"
 #include "money.h"
 #include "database.h"
+#include "productrepository.h"
+#include "purchaseorderrepository.h"
+#include "supplierrepository.h"
 #include "ledger.h"
 #include "salejournal.h"
 #include "vat.h"
@@ -35,7 +38,7 @@ void NewPurchaseOrderDialog::setupUI()
 
     QFormLayout *headerForm = new QFormLayout();
     supplierCombo = new QComboBox(this);
-    for (const Supplier &s : m_db.getAllSuppliers())
+    for (const Supplier &s : m_db.suppliers().getAllSuppliers())
         supplierCombo->addItem(s.name, s.id);
     headerForm->addRow("Supplier:", supplierCombo);
     mainLayout->addLayout(headerForm);
@@ -53,7 +56,7 @@ void NewPurchaseOrderDialog::setupUI()
     QHBoxLayout *lineLayout = new QHBoxLayout(lineGroup);
 
     productCombo = new QComboBox(this);
-    m_products = m_db.getAllProducts();
+    m_products = m_db.products().getAllProducts();
     for (const Product &p : m_products)
         productCombo->addItem(p.name, p.id);
     lineLayout->addWidget(new QLabel("Product:", this));
@@ -183,11 +186,11 @@ void NewPurchaseOrderDialog::onCreateClicked()
     const int supplierId = supplierCombo->currentData().toInt();
     const QString createdBy = UserManager::instance().getCurrentUsername();
 
-    const int poId = m_db.createPurchaseOrder(
+    const int poId = m_db.purchaseOrders().createPurchaseOrder(
         supplierId, m_lines, QString(), createdBy);
     if (poId < 0) {
         QMessageBox::critical(this, "Error",
-            "Failed to create purchase order: " + m_db.getLastError());
+            "Failed to create purchase order: " + m_db.purchaseOrders().lastError());
         return;
     }
     QMessageBox::information(this, "Purchase Order Created",
@@ -260,7 +263,7 @@ void PurchaseOrderDialog::setupUI()
 
 void PurchaseOrderDialog::loadOrders()
 {
-    const QVector<PurchaseOrder> orders = m_db.getAllPurchaseOrders();
+    const QVector<PurchaseOrder> orders = m_db.purchaseOrders().getAllPurchaseOrders();
     table->setRowCount(orders.size());
     for (int row = 0; row < orders.size(); ++row) {
         const PurchaseOrder &po = orders[row];
@@ -297,7 +300,7 @@ void PurchaseOrderDialog::onViewItemsClicked()
         return;
     }
 
-    const QVector<PurchaseOrderItem> items = m_db.getPurchaseOrderItems(id);
+    const QVector<PurchaseOrderItem> items = m_db.purchaseOrders().getPurchaseOrderItems(id);
     QString text;
     for (const PurchaseOrderItem &item : items) {
         text += QString("%1  x%2  @ %3  = %4\n")
@@ -325,9 +328,9 @@ void PurchaseOrderDialog::onReceiveClicked()
         return;
 
     const QString receivedBy = UserManager::instance().getCurrentUsername();
-    if (!m_db.receivePurchaseOrder(id, receivedBy)) {
+    if (!m_db.purchaseOrders().receivePurchaseOrder(id, receivedBy)) {
         QMessageBox::critical(this, "Error",
-            "Failed to receive purchase order: " + m_db.getLastError());
+            "Failed to receive purchase order: " + m_db.purchaseOrders().lastError());
         return;
     }
     // Auto-post the received goods to the General Ledger:
@@ -337,7 +340,7 @@ void PurchaseOrderDialog::onReceiveClicked()
         Vat vat(QSqlDatabase::database());
         vat.initSchema();
         const Money inputVat = vat.purchaseOrderInputVat(id);
-        const PurchaseOrder po = m_db.getPurchaseOrderById(id);
+        const PurchaseOrder po = m_db.purchaseOrders().getPurchaseOrderById(id);
         const QVector<GLLine> lines = buildPurchaseJournal(po.total, inputVat);
         if (!lines.isEmpty()) {
             Ledger ledger(QSqlDatabase::database());
@@ -367,9 +370,9 @@ void PurchaseOrderDialog::onCancelOrderClicked()
             QString("Cancel Purchase Order #%1?").arg(id))
         != QMessageBox::Yes)
         return;
-    if (!m_db.cancelPurchaseOrder(id)) {
+    if (!m_db.purchaseOrders().cancelPurchaseOrder(id)) {
         QMessageBox::critical(this, "Error",
-            "Failed to cancel purchase order: " + m_db.getLastError());
+            "Failed to cancel purchase order: " + m_db.purchaseOrders().lastError());
         return;
     }
     loadOrders();

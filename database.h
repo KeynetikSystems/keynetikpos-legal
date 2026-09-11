@@ -31,8 +31,22 @@
 #include <QDate>
 #include <QDateTime>
 #include <cmath>
+#include <memory>
 
 #include "money.h"
+
+// Data-access repositories. Forward-declared here (the accessors return them by
+// reference and the members are unique_ptr); database.cpp includes the full
+// definitions. Each repository's own header includes this one for Product/Sale/
+// etc., so we must NOT include them here — that would be a circular include.
+class ProductRepository;
+class SaleRepository;
+class SalesAnalyticsRepository;
+class RefundRepository;
+class SupplierRepository;
+class PurchaseOrderRepository;
+class ExpenseRepository;
+class CustomerRepository;
 
 struct Product
 {
@@ -239,105 +253,26 @@ public:
     // Must be called before initialize().
     void configureForTesting(const QString &dbPath = QStringLiteral(":memory:"));
 
-    // Product operations
-    QVector<Product> getAllProducts();
-    QVector<Product> getProductsByCategory(const QString &category);
-    Product getProductById(int id);
-    Product getProductByBarcode(const QString &barcode);
-    bool addProduct(const Product &product);
-    bool updateProduct(const Product &product);
-    bool deleteProduct(int id);
-    QStringList getAllCategories();
-
-    // Inventory operations
-    bool updateStock(int productId, int newQuantity);
-    bool setReorderLevel(int productId, int level);
-    bool decreaseStock(int productId, int quantity);
-    bool increaseStock(int productId, int quantity);
-    int getStock(int productId);
-
-    // Sales operations
-    // Atomically validates stock, inserts the sale + items, decrements stock,
-    // and — when customerId > 0 — awards loyalty points + deducts any applied
-    // store credit from the customer row, all in one transaction.
-    // Returns the new sale id, or -1 (see getLastError()).
-    int recordSale(const SaleRequest &request);
-    QVector<Sale> getAllSales();
-    QVector<Sale> getSalesByDateRange(const QDate &startDate, const QDate &endDate);
-    QVector<SaleItem> getSaleItems(int saleId);
-    Sale getSaleById(int saleId);
-
-    // Analytics
-    Money getTotalSalesToday();
-    Money getTotalSalesThisMonth();
-    int getTotalTransactionsToday();
-    QVector<QPair<QString, int>> getTopSellingProducts(int limit);
-    // Per-method takings from sale_payments over [startDate, endDate] (inclusive,
-    // 'yyyy-MM-dd'). Accurate for split tenders; only covers sales recorded after
-    // the sale_payments table was added.
-    QVector<PaymentTotal> getPaymentTotalsByMethod(const QDate &startDate,
-                                                   const QDate &endDate);
-
-    // Stock adjustment & history
-    bool logStockAdjustment(int productId, const QString &productName,
-                            int oldQty, int newQty,
-                            const QString &reason, const QString &adjustedBy);
-    QVector<StockAdjustment> getStockHistory(int productId, int limit) const;
-
-    // Refund operations
-    bool processRefund(int saleId, const QString &reason, const QString &processedBy);
-    bool isRefunded(int saleId) const;
-
-    // Supplier operations
-    QVector<Supplier> getAllSuppliers(bool includeInactive = false);
-    Supplier getSupplierById(int id);
-    bool addSupplier(const Supplier &supplier);
-    bool updateSupplier(const Supplier &supplier);
-    // Soft delete: suppliers are referenced by historical purchase orders, so
-    // they're deactivated (hidden from pickers) rather than removed.
-    bool deactivateSupplier(int id);
-
-    // Purchase order operations
-    // Inserts the PO header + line items in one transaction; status starts
-    // 'Pending'. Returns the new PO id, or -1 (see getLastError()).
-    int createPurchaseOrder(int supplierId, const QVector<PurchaseOrderItem> &items,
-                            const QString &notes, const QString &createdBy);
-    QVector<PurchaseOrder> getAllPurchaseOrders();
-    QVector<PurchaseOrder> getPurchaseOrdersBySupplier(int supplierId);
-    PurchaseOrder getPurchaseOrderById(int id);
-    QVector<PurchaseOrderItem> getPurchaseOrderItems(int poId);
-    // Atomically: increases stock for every line, updates each product's
-    // cost_price to the PO's unit cost (latest-cost basis), logs a
-    // stock_adjustments row per line, and flips the PO to 'Received'. Fails
-    // (no-op) if the PO isn't currently 'Pending'.
-    bool receivePurchaseOrder(int poId, const QString &receivedBy);
-    bool cancelPurchaseOrder(int poId);
-
-    // Expense category operations
-    QVector<ExpenseCategory> getAllExpenseCategories(bool includeInactive = false);
-    bool addExpenseCategory(const QString &name);
-    bool deactivateExpenseCategory(int id);
-
-    // Expense operations
-    bool addExpense(const Expense &expense);
-    QVector<Expense> getAllExpenses();
-    QVector<Expense> getExpensesByDateRange(const QDate &startDate,
-                                            const QDate &endDate);
-    // Sum of all expenses in the date range (for P&L computation).
-    Money getTotalExpenses(const QDate &startDate, const QDate &endDate);
-
-    // Customer operations
-    QVector<Customer> getAllCustomers(bool includeInactive = false);
-    Customer getCustomerById(int id);
-    // Efficient phone lookup — used at checkout for quick customer selection.
-    Customer getCustomerByPhone(const QString &phone);
-    bool addCustomer(const Customer &customer);
-    bool updateCustomer(const Customer &customer);
-    bool deactivateCustomer(int id);
-    // Explicit store-credit top-up (used from CustomerDialog — not the same
-    // as the credit earned during a sale, which goes through recordSale).
-    bool adjustStoreCredit(int customerId, Money delta, const QString &reason);
-    QVector<Sale> getCustomerPurchaseHistory(int customerId);
+    // ── Data-access repositories ────────────────────────────────────────────
+    // All domain reads/writes go through one of these focused repositories
+    // (catalog/stock, sales, analytics, refunds, suppliers, POs, expenses,
+    // customers). Database owns the single connection and hands out a long-lived
+    // repository per group; each repository carries its own lastError(), so a
+    // mutation and the error you read after it must use the SAME accessor:
+    //
+    //     if (!db.customers().addCustomer(c))
+    //         show(db.customers().lastError());   // same instance, error intact
+    //
+    // The accessors return references to Database-owned instances (constructed
+    // lazily on first use, after the connection is open), never temporaries.
+    ProductRepository         &products();
+    SaleRepository            &sales();
+    SalesAnalyticsRepository  &salesAnalytics();
+    RefundRepository          &refunds();
+    SupplierRepository        &suppliers();
+    PurchaseOrderRepository   &purchaseOrders();
+    ExpenseRepository         &expenses();
+    CustomerRepository        &customers();
 
     // Backup
     // Checkpoints the WAL and copies the live DB file to destDir as
@@ -363,10 +298,10 @@ public:
     // Call after backupTo() to confirm the copy is readable.
     bool verifyBackup(const QString &backupPath, QString *errorOut = nullptr);
 
-    // Profit calculation
-    Money getActualGrossProfit(const QDate &startDate, const QDate &endDate);
-    Money getActualGrossProfitToday();
-    Money getActualGrossProfitThisMonth();
+    // Shared row types returned by the analytics/inventory repositories. They
+    // live here (rather than in a repository header) because more than one
+    // repository and several dialogs refer to them as Database::ProfitLossRow /
+    // Database::StockValuationRow.
 
     // P&L: revenue, COGS, expenses, net profit for a date range
     struct ProfitLossRow {
@@ -377,8 +312,6 @@ public:
         Money grossProfit() const { return revenue - cogs; }
         Money netProfit()   const { return revenue - cogs - expenses; }
     };
-    QVector<ProfitLossRow> getProfitLossByDateRange(const QDate &start,
-                                                    const QDate &end);
 
     // Stock valuation: current qty * cost_price per product
     struct StockValuationRow {
@@ -388,17 +321,26 @@ public:
         Money   costPrice;
         Money   value() const { return costPrice * qty; }
     };
-    QVector<StockValuationRow> getStockValuation();
-
-    // Loyalty redemption: burn points to store credit (100 pts = 10 KSh = 1000 cents)
-    // Returns false if customer has insufficient points. Caller decides the rate.
-    bool redeemLoyaltyPoints(int customerId, int pointsToRedeem, Money creditValue);
 
 private:
     QSqlDatabase db;
     QString lastError;
     QString m_dbPath;           // full path to pos_database.db (for backups)
     bool initialized = false;   // guards against repeated initialize() calls
+
+    // Lazily-constructed, Database-owned repository instances handed out by the
+    // accessors above. Constructed on first access (after the connection is
+    // open) so they capture the live connection — including the one swapped in
+    // by configureForTesting(). unique_ptr over forward-declared types; the
+    // out-of-line ~Database() in database.cpp sees the complete types.
+    std::unique_ptr<ProductRepository>        m_products;
+    std::unique_ptr<SaleRepository>           m_sales;
+    std::unique_ptr<SalesAnalyticsRepository> m_salesAnalytics;
+    std::unique_ptr<RefundRepository>         m_refunds;
+    std::unique_ptr<SupplierRepository>       m_suppliers;
+    std::unique_ptr<PurchaseOrderRepository>  m_purchaseOrders;
+    std::unique_ptr<ExpenseRepository>        m_expenses;
+    std::unique_ptr<CustomerRepository>       m_customers;
 
     bool createTables();
     // Versioned schema migrations. schemaVersion()/setSchemaVersion() track the
@@ -413,7 +355,11 @@ private:
     bool ensureColumn(const QString &table, const QString &column,
                       const QString &definition);
     bool insertSampleData();
-    bool adjustStockWithLog(int productId, int qtyChange, const QString &reason, const QString &adjustedBy);
+
+    // Releases all lazily-cached repositories so they're rebuilt against the
+    // current connection on next access. Called when the connection is swapped
+    // (configureForTesting); each repository caches a copy of the handle.
+    void resetRepositories();
 };
 
 #endif // DATABASE_H

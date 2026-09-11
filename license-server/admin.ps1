@@ -13,6 +13,7 @@
 #   New-License -Key "ABCD-1F2E-WXYZ-9876" -Tier 3 -MaxDevices 2 -Note "Mama Njeri, Nakuru"
 #   Get-Licenses
 #   Revoke-License -Key "ABCD-1F2E-WXYZ-9876"
+#   Renew-License -Key "ABCD-1F2E-WXYZ-9876" -Months 12   # extends updates_until, not expires_at
 # =============================================================================
 
 # ── Configure these two once ────────────────────────────────────────────────
@@ -49,6 +50,19 @@ function Revoke-License {
         -Headers @{ Authorization = "Bearer $Token" }
 }
 
+function Renew-License {
+    param(
+        [Parameter(Mandatory)][string]$Key,
+        [int]$Months = 12,
+        [string]$BaseUrl = $script:BaseUrl,
+        [string]$Token   = $script:Token
+    )
+    Invoke-RestMethod -Method Post -Uri "$BaseUrl/admin/renew" `
+        -Headers @{ Authorization = "Bearer $Token" } `
+        -ContentType "application/json" `
+        -Body (@{ key = $Key; months = $Months } | ConvertTo-Json -Compress)
+}
+
 function Get-Licenses {
     param(
         [string]$BaseUrl = $script:BaseUrl,
@@ -56,5 +70,5 @@ function Get-Licenses {
     )
     (Invoke-RestMethod -Method Get -Uri "$BaseUrl/admin/list" `
         -Headers @{ Authorization = "Bearer $Token" }).keys |
-        Format-Table key, tier, devices_used, max_devices, revoked, expires_at, note -AutoSize
+        Format-Table key, tier, devices_used, max_devices, revoked, expires_at, updates_until, note -AutoSize
 }

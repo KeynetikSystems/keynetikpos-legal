@@ -1,7 +1,7 @@
 #include <windows.h>
 
 // App icon — shows in Explorer, taskbar, Alt+Tab
-IDI_ICON1 ICON "@CMAKE_CURRENT_SOURCE_DIR@/resources/icon.ico"
+IDI_ICON1 ICON "@CMAKE_CURRENT_SOURCE_DIR@/resources/app.ico"
 
 // Version info block — shows in File > Properties
 VS_VERSION_INFO VERSIONINFO

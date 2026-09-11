@@ -13,9 +13,10 @@
 #include "checkoutservice.h"
 
 #include "database.h"
+#include "customerrepository.h"
+#include "salerepository.h"
 #include "inventorymanager.h"
 #include "receiptprinter.h"
-#include "usermanager.h"
 #include "ledger.h"
 #include "salejournal.h"
 
@@ -24,10 +25,11 @@
 #include <QDateTime>
 
 CheckoutService::CheckoutService(Database &db, InventoryManager *inventory,
-                                 ReceiptPrinter *printer)
+                                 ReceiptPrinter *printer, OperatorContext op)
     : m_db(db)
     , m_inventory(inventory)
     , m_printer(printer)
+    , m_operator(std::move(op))
 {
 }
 
@@ -72,12 +74,12 @@ CheckoutResult CheckoutService::finalizeSale(const Cart &cart,
     request.payments        = payments;
     // Audit: stamp the sale with the signed-in cashier. shiftId stays 0 until a
     // live shift is wired into checkout (ShiftManager isn't on this path yet).
-    request.cashier         = UserManager::instance().getCurrentUsername();
+    request.cashier         = m_operator.username;
 
-    const int saleId = m_db.recordSale(request);
+    const int saleId = m_db.sales().recordSale(request);
 
     if (saleId < 0) {
-        result.error = m_db.getLastError();
+        result.error = m_db.sales().lastError();
         return result;
     }
     result.ok     = true;
@@ -112,7 +114,7 @@ CheckoutResult CheckoutService::finalizeSale(const Cart &cart,
             ledger.initSchema();   // idempotent; ensures the chart exists
             if (ledger.postEntry(QDate::currentDate(),
                                  QString("Sale #%1").arg(saleId), "sale", lines) < 0) {
-                UserManager::instance().logUserAction(
+                m_operator.log(
                     "Ledger Posting Failed",
                     QString("Sale #%1 not posted to GL: %2")
                         .arg(saleId).arg(ledger.lastError()));
@@ -134,14 +136,17 @@ CheckoutResult CheckoutService::finalizeSale(const Cart &cart,
     receipt.amountPaid      = amountPaid;
     receipt.change          = change;
     receipt.customerName    = customerId > 0
-                                  ? m_db.getCustomerById(customerId).name
+                                  ? m_db.customers().getCustomerById(customerId).name
                                   : QString();
-    receipt.cashierName     =
-        UserManager::instance().getCurrentUser().fullName;
+    receipt.cashierName     = m_operator.fullName;
 
-    m_printer->printReceipt(receipt);
+    // Best-effort: a sale is already durably recorded by here, so a missing or
+    // failing printer must never undo it (and a terminal with no receipt printer
+    // wired up shouldn't crash checkout).
+    if (m_printer)
+        m_printer->printReceipt(receipt);
 
-    UserManager::instance().logUserAction(
+    m_operator.log(
         "Sale Completed",
         QString("Sale #%1, Total: %2, Method: %3%4, Items: %5")
             .arg(saleId).arg(formatMoney(t.total))

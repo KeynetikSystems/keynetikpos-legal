@@ -8,7 +8,15 @@ CREATE TABLE IF NOT EXISTS keys (
     features    TEXT,                                   -- optional JSON array of feature
                                                         --   slugs; NULL = derive from tier
     revoked     INTEGER NOT NULL DEFAULT 0,
-    expires_at  TEXT,                                   -- ISO date or NULL = perpetual
+    expires_at  TEXT,                                   -- ISO date or NULL = perpetual;
+                                                        --   a hard license expiry (distinct
+                                                        --   from updates_until below)
+    updates_until TEXT,                                 -- ISO date or NULL = updates included
+                                                        --   forever. Past this date the key
+                                                        --   still activates/validates fine
+                                                        --   (the license never expires) — it
+                                                        --   only marks the install as no longer
+                                                        --   entitled to new version updates.
     note        TEXT,                                   -- e.g. customer name
     created_at  TEXT NOT NULL DEFAULT (datetime('now'))
 );
@@ -27,7 +35,9 @@ CREATE TABLE IF NOT EXISTS transactions (
     transaction_id TEXT PRIMARY KEY,                    -- CheckoutRequestID or TransID
     phone          TEXT NOT NULL,
     amount         TEXT,
-    key_assigned   TEXT NOT NULL,
+    key_assigned   TEXT NOT NULL,                       -- the sold key, or the renewed key
+    kind           TEXT NOT NULL DEFAULT 'sale',         -- 'sale' | 'renewal' — lets a retried
+                                                        --   callback resend the right message
     processed_at   TEXT NOT NULL DEFAULT (datetime('now'))
 );
 

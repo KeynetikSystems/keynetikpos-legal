@@ -8,3 +8,41 @@ compatibility_date = "2024-09-23"
 binding = "DB"
 database_name = "keynetik-license"
 database_id = "f94bdca7-0449-44f2-b5e7-ac6f35e5f9f1"
+
+# ── Staging ──────────────────────────────────────────────────────────────────
+# A completely separate Worker + D1 database — verifying a change here can
+# never touch the real `keys`/`activations`/`transactions` tables above.
+# One-time setup (requires `wrangler login` first):
+#
+#   wrangler d1 create keynetik-license-staging
+#   #  -> paste the printed database_id into database_id below
+#   wrangler d1 execute keynetik-license-staging --remote --file schema.sql
+#   wrangler d1 execute keynetik-license-staging --remote --file migrations/0001_add_tier.sql
+#   wrangler d1 execute keynetik-license-staging --remote --file migrations/0002_add_updates_until.sql
+#   wrangler d1 execute keynetik-license-staging --remote --file migrations/0003_add_transaction_kind.sql
+#
+# Then set staging's OWN secrets — do NOT reuse the production ones, or a
+# "staging" test can send a real SMS/email or move real money:
+#   wrangler secret put ADMIN_TOKEN --env staging       # a different token from prod
+#   wrangler secret put MPESA_CONSUMER_KEY --env staging    # Daraja SANDBOX app credentials
+#   wrangler secret put MPESA_CONSUMER_SECRET --env staging
+#   wrangler secret put MPESA_SHORTCODE --env staging       # sandbox: 174379
+#   wrangler secret put MPESA_PASSKEY --env staging          # Daraja sandbox passkey
+#   # STRIPE_WEBHOOK_SECRET / AT_API_KEY / AT_USERNAME / RESEND_API_KEY: use test-mode
+#   # keys where the provider offers them, or leave unset — every send function in
+#   # src/index.js already no-ops with a console.warn when its keys aren't set.
+#
+# Deploy:  wrangler deploy --env staging
+# Then point a test build's SERVER_URL (licensemanager.cpp) at the printed
+# *-staging.workers.dev URL to exercise the real client against it.
+[env.staging]
+name = "keynetik-license-staging"
+
+[env.staging.vars]
+MPESA_ENV = "sandbox"      # explicit, though this is already the code's default
+                            # when MPESA_ENV isn't "production" — see darajaBase()
+
+[[env.staging.d1_databases]]
+binding = "DB"
+database_name = "keynetik-license-staging"
+database_id = "PASTE_STAGING_DATABASE_ID_HERE"

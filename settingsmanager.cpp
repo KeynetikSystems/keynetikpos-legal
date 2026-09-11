@@ -19,7 +19,7 @@
 #include <QSqlError>
 #include <QDebug>
 
-SettingsManager::SettingsManager(QSqlDatabase &db, QObject *parent)
+SettingsManager::SettingsManager(QSqlDatabase db, QObject *parent)
     : QObject(parent), m_db(db)
 {
     createTableIfNotExist();

@@ -84,6 +84,7 @@ CMakeLists.txt.user*
 .uic/
 /build*/
 /out/
+/dist/
 .vs/
 .qtcreator/
 
@@ -102,3 +103,8 @@ mpesa-secrets.json
 *.db
 *.sqlite
 *.sqlite3
+
+# Mobile companion apps each live in their own independent git repo (not a
+# submodule) — see mobile/keynetik_scanner/.git. Ignored here so this repo
+# never tries to track it as embedded content.
+/mobile/

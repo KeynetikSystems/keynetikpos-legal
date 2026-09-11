@@ -17,6 +17,7 @@
 #include <QPainter>
 #include <QFontMetrics>
 #include <QListView>
+#include <QHash>
 
 // ─────────────────────────────────────────────────────────────────────────────
 // ProductGridModel
@@ -45,6 +46,60 @@ void ProductGridModel::updateStock(int productId, int newQty)
             emit dataChanged(idx, idx);
             return;
         }
+    }
+}
+
+void ProductGridModel::syncProducts(const QVector<Product> &products)
+{
+    QHash<int, int> incomingRowById;
+    incomingRowById.reserve(products.size());
+    for (int i = 0; i < products.size(); ++i)
+        incomingRowById.insert(products[i].id, i);
+
+    // Removals first, walking backwards so removing a row never invalidates
+    // the index of a row still to be checked.
+    for (int row = m_products.size() - 1; row >= 0; --row) {
+        if (!incomingRowById.contains(m_products[row].id)) {
+            beginRemoveRows(QModelIndex(), row, row);
+            m_products.removeAt(row);
+            endRemoveRows();
+        }
+    }
+
+    QHash<int, int> currentRowById;
+    currentRowById.reserve(m_products.size());
+    for (int i = 0; i < m_products.size(); ++i)
+        currentRowById.insert(m_products[i].id, i);
+
+    // Field-level refresh for rows that survived, so a price/stock/name edit
+    // made elsewhere (another device, a direct DB write) shows up too.
+    for (const Product &incoming : products) {
+        const auto it = currentRowById.constFind(incoming.id);
+        if (it == currentRowById.constEnd())
+            continue;   // new product, handled below
+        const int row = it.value();
+        Product &existing = m_products[row];
+        if (existing.name != incoming.name ||
+            existing.price != incoming.price ||
+            existing.stockQuantity != incoming.stockQuantity ||
+            existing.category != incoming.category ||
+            existing.reorderLevel != incoming.reorderLevel) {
+            existing = incoming;
+            const QModelIndex idx = index(row);
+            emit dataChanged(idx, idx);
+        }
+    }
+
+    QVector<Product> toAdd;
+    for (const Product &incoming : products) {
+        if (!currentRowById.contains(incoming.id))
+            toAdd.append(incoming);
+    }
+    if (!toAdd.isEmpty()) {
+        beginInsertRows(QModelIndex(), m_products.size(),
+                        m_products.size() + toAdd.size() - 1);
+        m_products += toAdd;
+        endInsertRows();
     }
 }
 

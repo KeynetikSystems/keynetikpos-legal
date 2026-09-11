@@ -215,7 +215,7 @@ QVector<Sale> SaleRepository::getSalesByDateRange(const QDate &startDate, const 
 {
     QVector<Sale> sales;
     QSqlQuery query(m_db);
-    query.prepare("SELECT id, sale_date, subtotal, tax, discount, total, payment_method, amount_paid, change_due, cashier, shift_id FROM sales WHERE DATE(sale_date) BETWEEN ? AND ? ORDER BY sale_date DESC");
+    query.prepare("SELECT id, sale_date, subtotal, tax, discount, total, payment_method, amount_paid, change_due, cashier, shift_id FROM sales WHERE DATE(sale_date, 'localtime') BETWEEN ? AND ? ORDER BY sale_date DESC");
     query.addBindValue(startDate.toString(Qt::ISODate));
     query.addBindValue(endDate.toString(Qt::ISODate));
     query.exec();
@@ -280,6 +280,29 @@ Sale SaleRepository::getSaleById(int saleId)
         s.shiftId = query.value(10).toInt();
     }
     return s;
+}
+
+int SaleRepository::getSaleIdByExternalRef(const QString &externalRef) const
+{
+    QSqlQuery query(m_db);
+    query.prepare("SELECT id FROM sales WHERE external_ref = ?");
+    query.addBindValue(externalRef);
+    if (query.exec() && query.next())
+        return query.value(0).toInt();
+    return -1;
+}
+
+bool SaleRepository::setExternalRef(int saleId, const QString &externalRef)
+{
+    QSqlQuery query(m_db);
+    query.prepare("UPDATE sales SET external_ref = ? WHERE id = ?");
+    query.addBindValue(externalRef);
+    query.addBindValue(saleId);
+    if (!query.exec()) {
+        m_lastError = query.lastError().text();
+        return false;
+    }
+    return true;
 }
 
 QVector<Sale> SaleRepository::getCustomerPurchaseHistory(int customerId)

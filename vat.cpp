@@ -126,7 +126,10 @@ Vat3 Vat::computeVat3(const QDate &from, const QDate &to) const
                   "FROM sale_items si "
                   "JOIN sales s ON s.id = si.sale_id "
                   "LEFT JOIN products p ON p.id = si.product_id "
-                  "WHERE date(s.sale_date) BETWEEN ? AND ? "
+                  // sale_date is stored UTC (CURRENT_TIMESTAMP); convert before
+                  // comparing against the local dates the caller supplies, or a
+                  // late-night sale lands in the wrong VAT period.
+                  "WHERE date(s.sale_date, 'localtime') BETWEEN ? AND ? "
                   "GROUP BY code");
         q.addBindValue(f);
         q.addBindValue(t);
@@ -159,7 +162,8 @@ Vat3 Vat::computeVat3(const QDate &from, const QDate &to) const
                   "JOIN purchase_orders po ON po.id = poi.po_id "
                   "LEFT JOIN products p ON p.id = poi.product_id "
                   "WHERE po.status = 'Received' "
-                  "  AND date(COALESCE(po.received_date, po.order_date)) BETWEEN ? AND ? "
+                  "  AND date(COALESCE(po.received_date, po.order_date), 'localtime') "
+                  "      BETWEEN ? AND ? "
                   "GROUP BY code");
         q.addBindValue(f);
         q.addBindValue(t);

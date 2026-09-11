@@ -13,6 +13,7 @@
 //    without re-creating schedules.
 // =============================================================================
 #include "schedulemanager.h"
+#include "salesanalyticsrepository.h"
 #include "database.h"      // for sales data used in report bodies
 #include <QSqlQuery>
 #include <QSqlError>
@@ -474,9 +475,9 @@ QString ScheduleManager::buildReportBody(const MessageSchedule &s) const
 
     switch (s.reportType) {
     case MessageSchedule::ZReport: {
-        Money todaySales = m_db.getTotalSalesToday();
-        int todayTx      = m_db.getTotalTransactionsToday();
-        Money profit     = m_db.getActualGrossProfitToday();
+        Money todaySales = m_db.salesAnalytics().getTotalSalesToday();
+        int todayTx      = m_db.salesAnalytics().getTotalTransactionsToday();
+        Money profit     = m_db.salesAnalytics().getActualGrossProfitToday();
         return QString("📊 *%1*\n"
                        "📅 %2\n\n"
                        "💰 Total Sales: KES %3\n"
@@ -488,8 +489,8 @@ QString ScheduleManager::buildReportBody(const MessageSchedule &s) const
             .arg(profit.toMajor(), 0, 'f', 2);
     }
     case MessageSchedule::SalesSummary: {
-        Money todaySales = m_db.getTotalSalesToday();
-        int todayTx      = m_db.getTotalTransactionsToday();
+        Money todaySales = m_db.salesAnalytics().getTotalSalesToday();
+        int todayTx      = m_db.salesAnalytics().getTotalTransactionsToday();
         return QString("💵 *%1*\n"
                        "📅 %2\n\n"
                        "Sales: KES %3  |  Transactions: %4")

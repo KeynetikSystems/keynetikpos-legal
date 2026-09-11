@@ -10,9 +10,20 @@
 //   POST /admin/generate    body: { max_devices?, tier?, expires_at?, note? }
 //   POST /admin/sell        body: { customer, email?, max_devices?, tier? }
 //   ( tier: 1 POS Core .. 4 ERP Full; defaults to 1. /activate + /validate
-//     return { valid, tier, features? } so the client unlocks the right plan. )
+//     return { valid, tier, features?, updatesUntil? } so the client unlocks
+//     the right plan and can show when its update entitlement runs out. )
 //   POST /admin/revoke?key=XXXX-...
+//   POST /admin/renew   body: { key, months? }   — extends updates_until;
+//                        the key's ACTIVATION never expires from this, only
+//                        its entitlement to new version updates does. Use
+//                        for any renewal payment that didn't arrive through
+//                        the M-Pesa self-serve path below (bank transfer,
+//                        Stripe, cash, etc.)
 //   GET  /admin/list
+//
+// M-Pesa self-serve renewal: a C2B/Paybill payment whose BillRefNumber is an
+// existing, unrevoked license key (not an email) is treated as a renewal for
+// that key — see the `/webhook/mpesa` handler — instead of buying a new one.
 //
 // In-store M-Pesa STK Push (license-key auth via X-License-Key + X-Device-Id):
 //   POST /pos/mpesa/stkpush   body { phone, amount, accountRef? } -> { checkoutId }
@@ -35,11 +46,20 @@
 //   STRIPE_WEBHOOK_SECRET  — whsec_... from Stripe Dashboard → Webhooks
 //   MPESA_CONSUMER_KEY     — Daraja app consumer key
 //   MPESA_CONSUMER_SECRET  — Daraja app consumer secret
-//   MPESA_SHORTCODE        — Paybill/Till (sandbox: 174379)
+//   MPESA_SHORTCODE        — the shortcode the passkey belongs to (sandbox:
+//                            174379). For Paybill this is the Paybill number;
+//                            for Buy Goods it is the Head Office / store
+//                            number, NOT the till the customer keys in.
 //   MPESA_PASSKEY          — Daraja Lipa-na-M-Pesa passkey
 // Required vars (wrangler.toml [vars] or `wrangler deploy --var`):
 //   MPESA_ENV              — "sandbox" (default) or "production"
 //   MPESA_TXN_TYPE         — "paybill" (default) or "buygoods"
+//   MPESA_TILL_NUMBER      — Buy Goods only: the till number, sent as PartyB.
+//                            Daraja wants BusinessShortCode = store/HO number
+//                            (it's what the Password hash is built from) and
+//                            PartyB = the till; they are different numbers.
+//                            Unset falls back to MPESA_SHORTCODE, which is
+//                            correct for Paybill and wrong for a real till.
 // =============================================================================
 
 const CHARSET  = "ABCDEFGHJKMNPQRSTUVWXYZ23456789"; // no 0/O/1/I/L look-alikes
@@ -76,28 +96,72 @@ function formatKey(raw16) {
   return `${raw16.slice(0,4)}-${raw16.slice(4,8)}-${raw16.slice(8,12)}-${raw16.slice(12,16)}`;
 }
 
+// Format + checksum check only (mirrors LicenseManager::validateKey on the
+// client) — does NOT confirm the key exists, is unrevoked, or is unexpired.
+// Used to recognise "this payment reference is shaped like one of our keys"
+// before bothering to look it up, e.g. for the M-Pesa renewal path below.
+async function isValidKeyFormat(norm16) {
+  if (!norm16 || norm16.length !== 16) return false;
+  const seg0 = norm16.slice(0, 4);
+  const seg1 = norm16.slice(4, 8);
+  const seg2 = norm16.slice(8, 12);
+  return (await checksumSegment(seg0, seg2)) === seg1;
+}
+
 // The entitlement payload returned by /activate and /validate. The client reads
 // `tier` (defaulting to 1) and applies it; `features` is only sent when a key
 // carries an explicit override, otherwise the client derives the feature list
-// from the tier.
+// from the tier. `updatesUntil` is the optional update-entitlement date (see
+// schema.sql) — the client stores it for display only, nothing here uses it to
+// deny activation or validation. NULL means updates are included forever.
 function entitlement(row) {
   const out = { valid: true, tier: row.tier ?? 1 };
   if (row.features) {
     try { out.features = JSON.parse(row.features); } catch { /* ignore bad JSON */ }
   }
+  if (row.updates_until) out.updatesUntil = row.updates_until;
   return out;
 }
 
-// Self-serve plan prices — ONE-TIME, whole KES. This IS the price list: a
-// customer M-Pesas the tier's price and gets that tier; paying between tiers
-// rounds DOWN to the tier they fully covered, and any completed payment grants
-// at least POS Core. Positioned against monthly SaaS (each tier is well under a
-// year of the tool it replaces, then free forever). Tune to your market and
-// re-deploy. NOTE: the M-Pesa flow grants a single-device key; multi-till deals
-// are sold manually (admin.ps1 New-License -Tier -MaxDevices).
-const PRICE_POS_PRO  = 8000;    // Tier 2 — reports, users, multi-till, messaging
-const PRICE_ERP_LITE = 18000;   // Tier 3 — purchasing, customers, expenses, P&L
-const PRICE_ERP_FULL = 35000;   // Tier 4 — general ledger, payroll, VAT
+// Self-serve plan prices — ONE-TIME. USD is the single source of truth (set
+// here); the KES ladder below is DERIVED from it, not set independently, so
+// the two can't drift out of sync with each other. Positioned against
+// monthly SaaS (each tier is well under a year of the tool it replaces, then
+// free forever). NOTE: the self-serve flows grant a single-device key;
+// multi-till deals are sold manually (admin.ps1 New-License -Tier -MaxDevices).
+//
+// These are still a market-positioned starting point, not independently
+// researched — validate against real competitor quotes (Loyverse add-ons,
+// QuickBooks KE, Odoo/Sage) before this determines what a paying customer
+// actually receives. Tune here and re-deploy; nowhere else needs to change.
+const PRICE_POS_PRO_USD  = 59;    // Tier 2 — reports, users, multi-till, messaging
+const PRICE_ERP_LITE_USD = 139;   // Tier 3 — purchasing, customers, expenses, P&L
+const PRICE_ERP_FULL_USD = 269;   // Tier 4 — general ledger, payroll, VAT
+
+// USD/KES market rate, checked 2026-08. KES has actually been fairly stable
+// against USD through 2026 (128.57-130.29 range) rather than the more
+// volatile rate history from earlier years, so a static constant re-checked
+// occasionally is reasonable here — re-verify and re-deploy if it drifts
+// meaningfully, same maintenance model as the tier prices themselves.
+const USD_TO_KES_RATE = 129;
+
+// Convert a USD price to a clean, round KES amount a customer can actually
+// type into an M-Pesa payment — round to the nearest 1,000 KES rather than
+// using the raw converted figure.
+function kesFromUsd(usd) {
+  return Math.round((usd * USD_TO_KES_RATE) / 1000) * 1000;
+}
+
+const PRICE_POS_PRO  = kesFromUsd(PRICE_POS_PRO_USD);
+const PRICE_ERP_LITE = kesFromUsd(PRICE_ERP_LITE_USD);
+const PRICE_ERP_FULL = kesFromUsd(PRICE_ERP_FULL_USD);
+
+function tierForAmountUsd(usd) {
+  if (usd >= PRICE_ERP_FULL_USD) return 4;
+  if (usd >= PRICE_ERP_LITE_USD) return 3;
+  if (usd >= PRICE_POS_PRO_USD)  return 2;
+  return 1;                     // POS Core (floor for any completed payment)
+}
 
 function tierForAmount(kes) {
   if (kes >= PRICE_ERP_FULL) return 4;
@@ -122,11 +186,39 @@ async function assignNextKey(db, note, maxDevices = 1, tier = 1) {
 
   if (!row) return null;
 
-  await db.prepare("UPDATE keys SET note = ?, max_devices = ?, tier = ? WHERE key = ?")
-    .bind(note, maxDevices, tier, row.key)
-    .run();
+  // A fresh paid purchase includes 1 year of updates, same as a manual
+  // New-License sale — see "Update entitlement & renewals" in the README.
+  // POS Core (tier 1) has no renewal concept at all: stays NULL, meaning
+  // updates included forever, matching its "free, permanently" pricing.
+  const initialUpdatesUntil = tier >= 2 ? addMonths(new Date(), 12) : null;
+
+  await db.prepare(
+    "UPDATE keys SET note = ?, max_devices = ?, tier = ?, updates_until = ? WHERE key = ?",
+  ).bind(note, maxDevices, tier, initialUpdatesUntil, row.key).run();
 
   return formatKey(row.key);
+}
+
+// Add `months` to `date` and return YYYY-MM-DD. Does not mutate `date`.
+function addMonths(date, months) {
+  const d = new Date(date.getTime());
+  d.setUTCMonth(d.getUTCMonth() + months);
+  return d.toISOString().slice(0, 10);
+}
+
+// Push a key's `updates_until` out by `months`, stacking from the LATER of
+// "now" and its current value (so renewing before the old date lapses adds
+// the full period on top rather than wasting the remainder). Shared by
+// POST /admin/renew and the M-Pesa self-serve renewal path. Returns the new
+// date as YYYY-MM-DD.
+async function extendUpdatesUntil(db, key, months) {
+  const row  = await db.prepare("SELECT updates_until FROM keys WHERE key = ?").bind(key).first();
+  const now  = new Date();
+  const base = row?.updates_until && new Date(row.updates_until) > now
+    ? new Date(row.updates_until) : now;
+  const newUntil = addMonths(base, months);
+  await db.prepare("UPDATE keys SET updates_until = ? WHERE key = ?").bind(newUntil, key).run();
+  return newUntil;
 }
 
 // ── SMS via Africa's Talking ──────────────────────────────────────────────────
@@ -380,9 +472,15 @@ export default {
       catch (e) { console.error(e); return json({ ok: false, error: "daraja_auth_failed" }, 502); }
 
       const ts       = darajaTimestamp();
+      // Password is always keyed to MPESA_SHORTCODE — for Buy Goods that's the
+      // Head Office number the passkey was issued against, never the till.
       const password = btoa(`${env.MPESA_SHORTCODE}${env.MPESA_PASSKEY}${ts}`);
-      const txnType  = env.MPESA_TXN_TYPE === "buygoods"
-                         ? "CustomerBuyGoodsOnline" : "CustomerPayBillOnline";
+      const buyGoods = env.MPESA_TXN_TYPE === "buygoods";
+      const txnType  = buyGoods ? "CustomerBuyGoodsOnline" : "CustomerPayBillOnline";
+      // Buy Goods credits the till (PartyB), which differs from the HO number in
+      // BusinessShortCode. Paybill uses the same number for both.
+      const partyB   = (buyGoods && env.MPESA_TILL_NUMBER)
+                         ? String(env.MPESA_TILL_NUMBER) : env.MPESA_SHORTCODE;
 
       const stkRes = await fetch(`${darajaBase(env)}/mpesa/stkpush/v1/processrequest`, {
         method:  "POST",
@@ -394,7 +492,7 @@ export default {
           TransactionType:   txnType,
           Amount:            amount,
           PartyA:            phone,
-          PartyB:            env.MPESA_SHORTCODE,
+          PartyB:            partyB,
           PhoneNumber:       phone,
           CallBackURL:       `${url.origin}/pos/mpesa/callback`,
           AccountReference:  ref,
@@ -467,7 +565,7 @@ export default {
       const body = await request.json().catch(() => null);
       if (!body) return json({ ResultCode: 1, ResultDesc: "Invalid JSON" });
 
-      let txId, phone, amount, email, customerName;
+      let txId, phone, amount, email, customerName, ref;
 
       // ── Detect payload type ───────────────────────────────────
       if (body.Body?.stkCallback) {
@@ -492,8 +590,10 @@ export default {
         customerName = [body.FirstName, body.MiddleName, body.LastName]
                          .filter(Boolean).join(" ").trim() || null;
 
-        // Customer can put their email in the payment reference field
-        const ref = (body.BillRefNumber ?? "").trim();
+        // Customer puts either their email or (to renew an existing key's
+        // update entitlement instead of buying a new one) that key itself in
+        // the payment reference field.
+        ref = (body.BillRefNumber ?? "").trim();
         if (ref.includes("@")) email = ref;
 
       } else {
@@ -506,16 +606,58 @@ export default {
         return json({ ResultCode: 0, ResultDesc: "Missing fields" });
       }
 
-      // ── Idempotency — don't double-assign on duplicate callbacks ─
+      // ── Idempotency — don't double-assign/double-renew on duplicate
+      // callbacks. `kind` (added for the renewal feature; pre-existing rows
+      // default to 'sale') picks which message a retry resends, since a
+      // renewal retry must NOT repeat the generic "here's your new key" text.
       const prior = await env.DB.prepare(
-        "SELECT key_assigned FROM transactions WHERE transaction_id = ?",
+        "SELECT key_assigned, kind FROM transactions WHERE transaction_id = ?",
       ).bind(txId).first();
 
       if (prior) {
-        // Already processed — resend the key silently
-        await sendSms(env, phone, prior.key_assigned);
-        if (email) await sendEmail(env, email, prior.key_assigned, customerName ?? phone);
+        if (prior.kind === "renewal") {
+          const row = await env.DB.prepare(
+            "SELECT updates_until FROM keys WHERE key = ?",
+          ).bind(prior.key_assigned).first();
+          await sendSms(env, phone,
+            `KeynetikPOS: updates renewed on key ****-****-****-${prior.key_assigned.slice(-4)} `
+            + `through ${row?.updates_until ?? "?"}. Support: support@keynetik.com`);
+        } else {
+          // Already processed — resend the key silently
+          await sendSms(env, phone, prior.key_assigned);
+          if (email) await sendEmail(env, email, prior.key_assigned, customerName ?? phone);
+        }
         return json({ ResultCode: 0, ResultDesc: "Already processed" });
+      }
+
+      // ── Renewal? — only reachable from the C2B branch, where `ref` is set.
+      // A renewal reference must be 16 chars AND pass the same checksum the
+      // client validates keys with AND already exist, unrevoked, in `keys` —
+      // so a stray/garbled reference can never accidentally match a real key
+      // and silently misroute a new-purchase payment into a renewal.
+      const refKey = ref ? ref.toUpperCase().replace(/-/g, "").trim() : "";
+      if (refKey && (await isValidKeyFormat(refKey))) {
+        const existing = await env.DB.prepare(
+          "SELECT key, revoked FROM keys WHERE key = ?",
+        ).bind(refKey).first();
+
+        if (existing && !existing.revoked) {
+          const updatesUntil = await extendUpdatesUntil(env.DB, refKey, 12);
+
+          await env.DB.prepare(
+            `INSERT INTO transactions (transaction_id, phone, amount, key_assigned, kind)
+             VALUES (?, ?, ?, ?, 'renewal')`,
+          ).bind(txId, phone, amount, refKey).run();
+
+          await sendSms(env, phone,
+            `KeynetikPOS: updates renewed on key ****-****-****-${refKey.slice(-4)} `
+            + `through ${updatesUntil}. Support: support@keynetik.com`);
+
+          console.log("Renewal processed", { txId, phone, refKey, updatesUntil });
+          return json({ ResultCode: 0, ResultDesc: "Renewal processed" });
+        }
+        // Key-shaped but unknown/revoked — fall through and sell a new key
+        // instead of silently dropping the payment.
       }
 
       // ── Assign a key from stock ───────────────────────────────
@@ -583,12 +725,23 @@ export default {
         return new Response("ok", { status: 200 });
       }
 
-      // Assign a key from stock
-      const amount = session.amount_total
-        ? `${(session.amount_total / 100).toFixed(2)} ${(session.currency ?? "usd").toUpperCase()}`
+      // Assign a key from stock. amount_total is the smallest currency unit
+      // (cents for USD); the tier ladder above is USD-only, so a non-USD
+      // checkout can't be priced against it — falls back to POS Core (tier 1,
+      // same as before this fix) with a loud log instead of guessing, rather
+      // than silently mis-tiering a payment in an unpriced currency.
+      const currency = (session.currency ?? "usd").toLowerCase();
+      const amount   = session.amount_total
+        ? `${(session.amount_total / 100).toFixed(2)} ${currency.toUpperCase()}`
         : "";
+      if (session.amount_total && currency !== "usd") {
+        console.warn("Stripe checkout in a currency with no price ladder — defaulting to tier 1",
+          { paymentId, currency, amountTotal: session.amount_total });
+      }
+      const paidTier = (session.amount_total && currency === "usd")
+        ? tierForAmountUsd(session.amount_total / 100) : 1;
       const note     = `${customerName} <${email}> via Stripe ${paymentId}`;
-      const plainKey = await assignNextKey(env.DB, note, 1);
+      const plainKey = await assignNextKey(env.DB, note, 1, paidTier);
 
       if (!plainKey) {
         console.error("OUT OF STOCK: Stripe payment received, no keys available", { paymentId, email, amount });
@@ -673,10 +826,35 @@ export default {
         return json({ ok: true, changed: r.meta.changes });
       }
 
+      // POST /admin/renew   body: { key, months? }
+      // Extends a key's update entitlement — the license itself was already
+      // perpetual before this and stays perpetual; this only pushes out
+      // `updates_until`, the date past which the install stops being offered
+      // new version updates. Renewing from a non-existent updates_until (NULL,
+      // i.e. never renewed / a pre-renewal-era key) starts the clock from today.
+      // `months` defaults to 12; extension stacks from the LATER of "now" and
+      // the key's current updates_until, so renewing early doesn't waste time
+      // already paid for.
+      if (url.pathname === "/admin/renew" && request.method === "POST") {
+        const body = await request.json().catch(() => null);
+        const key  = norm(body?.key);
+        if (key.length !== 16) return json({ error: "bad key" }, 400);
+
+        const exists = await env.DB.prepare("SELECT 1 FROM keys WHERE key = ?").bind(key).first();
+        if (!exists) return json({ error: "not_found" }, 404);
+
+        const months = Number.isFinite(Number(body?.months)) && Number(body?.months) > 0
+          ? Math.floor(Number(body.months)) : 12;
+
+        const updatesUntil = await extendUpdatesUntil(env.DB, key, months);
+        return json({ ok: true, key: formatKey(key), updatesUntil });
+      }
+
       // GET /admin/list
       if (url.pathname === "/admin/list" && request.method === "GET") {
         const { results } = await env.DB.prepare(
-          `SELECT k.key, k.max_devices, k.tier, k.revoked, k.expires_at, k.note,
+          `SELECT k.key, k.max_devices, k.tier, k.revoked, k.expires_at,
+                  k.updates_until, k.note,
                   k.created_at, COUNT(a.device_id) AS devices_used
            FROM keys k LEFT JOIN activations a ON a.key = k.key
            GROUP BY k.key ORDER BY k.created_at DESC`,
